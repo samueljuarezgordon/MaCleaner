@@ -130,6 +130,20 @@ final class MaintenanceModel {
 
     private(set) var fullDiskAccess: FullDiskAccessStatus = .undetermined
     private(set) var helperState: HelperInstallationState = .notRegistered
+    /// Versión del demonio que responde ahora mismo (`nil` si no responde o no está activo).
+    private(set) var helperVersion: String?
+    private(set) var isCheckingHelper = false
+    private(set) var isReinstallingHelper = false
+
+    /// El demonio activo es de una versión anterior a la que espera la app.
+    var isHelperOutdated: Bool {
+        helperState == .enabled && helperVersion.map { $0 != HelperConstants.helperVersion } ?? false
+    }
+
+    /// Activo en Ajustes, pero no responde a la app.
+    var isHelperUnresponsive: Bool {
+        helperState == .enabled && !isCheckingHelper && helperVersion == nil
+    }
     private(set) var estimates: [MaintenanceAction: Estimate] = [:]
     private(set) var isMeasuring = false
     private(set) var running: MaintenanceAction?
@@ -139,6 +153,38 @@ final class MaintenanceModel {
     func refresh() {
         fullDiskAccess = FullDiskAccessProbe.check()
         helperState = HelperInstaller.state
+        Task { await checkHelperVersion() }
+    }
+
+    func checkHelperVersion() async {
+        guard helperState == .enabled, !isCheckingHelper else {
+            if helperState != .enabled { helperVersion = nil }
+            return
+        }
+        isCheckingHelper = true
+        helperVersion = await HelperClient.shared.installedVersion()
+        isCheckingHelper = false
+    }
+
+    /// Da de baja y vuelve a registrar el demonio para cargar el binario de esta versión.
+    func reinstallHelper() {
+        guard !isReinstallingHelper else { return }
+        isReinstallingHelper = true
+        Task {
+            do {
+                try await HelperInstaller.reinstall()
+                append("Asistente reinstalado.")
+            } catch {
+                append("No se pudo reinstalar el asistente: \(error.localizedDescription)")
+            }
+            // Un demonio nuevo sin aprobar queda en «requiere aprobación».
+            helperVersion = nil
+            refresh()
+            isReinstallingHelper = false
+            if helperState == .requiresApproval {
+                HelperInstaller.openApprovalSettings()
+            }
+        }
     }
 
     func installHelper() {
@@ -559,20 +605,92 @@ private struct PermissionsCard: View {
             PermissionRow(
                 title: "Asistente privilegiado",
                 systemImage: "key.fill",
-                explanation: "Necesario para borrar cachés y registros del sistema y purgar instantáneas. Solo acepta borrar dentro de /Library/Caches, /Library/Logs y /private/var/log, y comprueba la firma de MaCleaner en cada petición.",
-                isGranted: model.helperState == .enabled
+                explanation: "Necesario para borrar cachés y registros del sistema, purgar instantáneas y quitar servicios de inicio de /Library. Solo acepta rutas de una lista blanca y comprueba la firma de MaCleaner en cada petición.",
+                isGranted: model.helperState == .enabled && !model.isHelperOutdated && !model.isHelperUnresponsive
             ) {
                 switch model.helperState {
                 case .requiresApproval:
                     Button("Aprobar en Ajustes…", action: HelperInstaller.openApprovalSettings)
-                case .notRegistered, .notFound, .enabled:
+                case .notRegistered, .notFound:
                     Button("Instalar", action: model.installHelper)
+                case .enabled:
+                    Button("Reinstalar", action: model.reinstallHelper)
+                        .disabled(model.isReinstallingHelper)
                 }
             }
+
+            HelperStatusDetails(model: model)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(in: .rect(cornerRadius: 20))
+    }
+}
+
+/// Versión instalada, avisos y guía de instalación y reinstalación del asistente.
+private struct HelperStatusDetails: View {
+    let model: MaintenanceModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if model.isReinstallingHelper {
+                Label {
+                    Text("Reinstalando…")
+                } icon: {
+                    ProgressView().controlSize(.small)
+                }
+            } else if model.isHelperOutdated, let version = model.helperVersion {
+                warning("Está activa la versión \(version), pero esta versión de MaCleaner necesita la \(HelperConstants.helperVersion). Pulsa «Reinstalar» para actualizarlo.")
+            } else if model.isHelperUnresponsive {
+                warning("Aparece activo en Ajustes, pero no responde. Suele pasar al mover o renombrar la app, o tras compilarla de nuevo con otra firma. Pulsa «Reinstalar».")
+            } else if model.helperState == .enabled, let version = model.helperVersion {
+                Label("Versión \(version) · responde correctamente", systemImage: "checkmark.seal.fill")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            } else if model.helperState == .notFound {
+                warning("El asistente no está dentro de la app. Compila el esquema MaCleaner completo (incluye el target CleanerHelper) y ejecuta la app desde ahí.")
+            }
+
+            DisclosureGroup("Cómo instalar o reinstalar el asistente") {
+                VStack(alignment: .leading, spacing: 8) {
+                    step(1, "Pulsa «Instalar» (o «Reinstalar» si ya estaba activo).")
+                    step(2, "macOS abrirá Ajustes del Sistema › General › Ítems de inicio y extensiones. En «Permitir en segundo plano», activa MaCleaner. Te pedirá tu contraseña.")
+                    step(3, "Vuelve a MaCleaner: el estado se actualiza solo y debe mostrar «Versión \(HelperConstants.helperVersion) · responde correctamente».")
+                    Text("Reinstala cuando actualices MaCleaner, cuando la app lo pida o si las acciones del sistema fallan. Reinstalar no borra nada: solo detiene el asistente antiguo y registra el nuevo.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .padding(.top, 4)
+                    HStack {
+                        Button("Abrir Ítems de inicio…", action: HelperInstaller.openApprovalSettings)
+                        Button("Comprobar de nuevo") { model.refresh() }
+                            .disabled(model.isCheckingHelper)
+                    }
+                    .padding(.top, 4)
+                }
+                .padding(.top, 6)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            .font(.callout)
+        }
+        .padding(.leading, 40)
+    }
+
+    private func warning(_ text: String) -> some View {
+        Label(text, systemImage: "exclamationmark.triangle.fill")
+            .font(.callout)
+            .foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func step(_ number: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text("\(number)")
+                .font(.caption.bold().monospacedDigit())
+                .frame(width: 18, height: 18)
+                .background(.tint.opacity(0.2), in: .circle)
+            Text(text)
+                .foregroundStyle(.secondary)
+        }
     }
 }
 

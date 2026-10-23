@@ -3,7 +3,7 @@ import Foundation
 
 /// Implementación de las operaciones privilegiadas. Se ejecuta como root.
 nonisolated final class PrivilegedService: NSObject, HelperProtocol {
-    static let version = "1.1.0"
+    static let version = HelperConstants.helperVersion
 
     private let clientRequirement: String
 

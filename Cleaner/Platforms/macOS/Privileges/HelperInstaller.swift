@@ -39,6 +39,15 @@ enum HelperInstaller {
         try await service.unregister()
     }
 
+    /// Da de baja el demonio (launchd detiene el proceso antiguo) y lo vuelve a registrar,
+    /// para que la próxima conexión arranque el binario de esta versión de la app.
+    static func reinstall() async throws {
+        if service.status != .notRegistered && service.status != .notFound {
+            try await service.unregister()
+        }
+        try service.register()
+    }
+
     static func openApprovalSettings() {
         SMAppService.openSystemSettingsLoginItems()
     }

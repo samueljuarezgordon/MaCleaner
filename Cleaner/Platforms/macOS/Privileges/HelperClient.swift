@@ -32,6 +32,20 @@ actor HelperClient {
         }
     }
 
+    /// Versión del demonio en ejecución, o `nil` si no responde en `timeout`.
+    func installedVersion(timeout: Duration = .seconds(3)) async -> String? {
+        // Carrera sin estructura: una llamada XPC colgada no atiende a la cancelación, así
+        // que un TaskGroup esperaría a que terminase. Gana quien reanude primero.
+        await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            let once = ResumeOnce(continuation)
+            Task { once.resume(returning: try? await self.version()) }
+            Task {
+                try? await Task.sleep(for: timeout)
+                once.resume(returning: nil)
+            }
+        }
+    }
+
     func removeItems(atPaths paths: [String]) async throws -> (removed: [String], failures: [String]) {
         try await call { proxy, once in
             proxy.removeItems(atPaths: paths) { removed, failures in

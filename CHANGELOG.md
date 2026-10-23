@@ -1,5 +1,12 @@
 # Historial de cambios
 
+## 1.0.1 — 2026-10-23
+
+- La app detecta la versión del asistente privilegiado en ejecución y avisa si está desactualizado o no responde.
+- Nuevo botón **Reinstalar** y guía paso a paso en *Mantenimiento y permisos*.
+- Mensajes de error claros cuando una limpieza necesita reinstalar el asistente.
+- Nuevo manual: [docs/HELPER.md](docs/HELPER.md).
+
 ## 1.0 — 2026-10-23
 
 ### Novedades

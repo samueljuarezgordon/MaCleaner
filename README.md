@@ -111,7 +111,9 @@ swiftc Tools/make-icon.swift -o /tmp/make-icon
 | Permiso | Para qué | Cómo |
 |---|---|---|
 | **Acceso total al disco** | Analizar Mail, copias de iPhone, contenedores de apps y otras carpetas protegidas. | Mantenimiento y permisos › Abrir Ajustes… |
-| **Asistente privilegiado** | Borrar cachés y registros del sistema, purgar instantáneas y quitar servicios de terceros de `/Library`. | Mantenimiento y permisos › Instalar (se aprueba en Ajustes › General › Ítems de inicio). |
+| **Asistente privilegiado** | Borrar cachés y registros del sistema, purgar instantáneas y quitar servicios de terceros de `/Library`. | Mantenimiento y permisos › Instalar (se aprueba en Ajustes › General › Ítems de inicio). Tras actualizar la app, **Reinstalar**. |
+
+Instrucciones paso a paso, reinstalación y solución de problemas: **[docs/HELPER.md](docs/HELPER.md)**. La app también las incluye en *Mantenimiento y permisos › Cómo instalar o reinstalar el asistente*.
 
 La app no usa el sandbox de macOS: el escáner de disco, la sonda de TCC y el registro del demonio son incompatibles con él. El diseño de seguridad del asistente está en [docs/SECURITY.md](docs/SECURITY.md).
 
@@ -169,6 +171,7 @@ Más detalle en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 - [Arquitectura](docs/ARCHITECTURE.md)
 - [Catálogo de categorías y reglas de riesgo](docs/CATEGORIES.md)
+- [Asistente privilegiado: instalar, reinstalar y solucionar problemas](docs/HELPER.md)
 - [Seguridad del asistente privilegiado](docs/SECURITY.md)
 - [Cómo contribuir](CONTRIBUTING.md)
 - [Historial de cambios](CHANGELOG.md)

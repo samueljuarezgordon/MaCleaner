@@ -143,7 +143,14 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
                     if item.id.hasPrefix("/Library/LaunchAgents/") {
                         await LaunchItemStatus.bootoutUserService(label)
                     }
-                    let result = try await helper.removeLaunchItem(atPath: item.id)
+                    let result: (removed: Bool, message: String)
+                    do {
+                        result = try await helper.removeLaunchItem(atPath: item.id)
+                    } catch {
+                        // Un asistente 1.0 no conoce esta operación: XPC devuelve un error genérico.
+                        failures.append("\(item.displayName): el asistente privilegiado no responde o está desactualizado. Reinstálalo en Mantenimiento y permisos.")
+                        continue
+                    }
                     if result.removed {
                         disabled += 1
                     } else {
@@ -166,7 +173,7 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
                 reclaimed += privileged.filter { removed.contains($0.id) }.reduce(0) { $0 + $1.reclaimableBytes }
                 failures += result.failures
             } catch {
-                failures.append("Elementos del sistema: instala y aprueba el asistente privilegiado (\(error.localizedDescription)).")
+                failures.append("Elementos del sistema: instala (o reinstala) y aprueba el asistente privilegiado en Mantenimiento y permisos (\(error.localizedDescription)).")
             }
         }
 

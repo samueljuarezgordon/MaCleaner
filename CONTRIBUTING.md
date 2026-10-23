@@ -19,6 +19,7 @@
 
 ## Reglas de seguridad
 
+- Si cambias `HelperProtocol` o `PrivilegedService`, sube `HelperConstants.helperVersion` (ver [docs/HELPER.md](docs/HELPER.md)).
 - No amplíes `HelperConstants.privilegedRoots` ni `launchItemRoots` sin revisar `docs/SECURITY.md`.
 - Cualquier operación nueva del demonio debe llamar a `callerIsTrusted()` y validar sus argumentos dentro del propio demonio.
 - Lo de riesgo alto nunca debe seleccionarse automáticamente.
