@@ -387,7 +387,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Config/Cleaner-$(SWIFT_PLATFORM_TARGET_PREFIX).entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = J7G884KB32;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -409,7 +409,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tuempresa.Cleaner;
 				PRODUCT_NAME = MaCleaner;
 				REGISTER_APP_GROUPS = YES;
@@ -431,7 +431,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGN_ENTITLEMENTS = "Config/Cleaner-$(SWIFT_PLATFORM_TARGET_PREFIX).entitlements";
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 2;
+				CURRENT_PROJECT_VERSION = 3;
 				DEVELOPMENT_TEAM = J7G884KB32;
 				ENABLE_APP_SANDBOX = NO;
 				ENABLE_HARDENED_RUNTIME = YES;
@@ -453,7 +453,7 @@
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
-				MARKETING_VERSION = 1.0.1;
+				MARKETING_VERSION = 1.0.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tuempresa.Cleaner;
 				PRODUCT_NAME = MaCleaner;
 				REGISTER_APP_GROUPS = YES;
@@ -478,8 +478,8 @@
 				DEVELOPMENT_TEAM = J7G884KB32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = CleanerHelper/Info.plist;
-				MARKETING_VERSION = 1.0.1;
-				CURRENT_PROJECT_VERSION = 2;
+				MARKETING_VERSION = 1.0.2;
+				CURRENT_PROJECT_VERSION = 3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tuempresa.Cleaner.Helper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;
@@ -499,8 +499,8 @@
 				DEVELOPMENT_TEAM = J7G884KB32;
 				ENABLE_HARDENED_RUNTIME = YES;
 				INFOPLIST_FILE = CleanerHelper/Info.plist;
-				MARKETING_VERSION = 1.0.1;
-				CURRENT_PROJECT_VERSION = 2;
+				MARKETING_VERSION = 1.0.2;
+				CURRENT_PROJECT_VERSION = 3;
 				PRODUCT_BUNDLE_IDENTIFIER = com.tuempresa.Cleaner.Helper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = macosx;

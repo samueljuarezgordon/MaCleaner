@@ -1,11 +1,19 @@
 # Historial de cambios
 
+## 1.0.2 — 2026-10-23
+
+### Correcciones
+- La cuadrícula «Qué se analiza» de la pantalla de inicio ya no sale desordenada: celdas alineadas y una descripción corta por módulo.
+- Listas, fechas y números en español. Antes salían en inglés («and», «5 days ago», «65.59 GB») porque el idioma base del proyecto era el inglés.
+
 ## 1.0.1 — 2026-10-23
 
 - La app detecta la versión del asistente privilegiado en ejecución y avisa si está desactualizado o no responde.
 - Nuevo botón **Reinstalar** y guía paso a paso en *Mantenimiento y permisos*.
 - Mensajes de error claros cuando una limpieza necesita reinstalar el asistente.
 - Nuevo manual: [docs/HELPER.md](docs/HELPER.md).
+- El asistente privilegiado ahora lleva número de versión en su Info.plist.
+- Primera release descargable para macOS.
 
 ## 1.0 — 2026-10-23
 
