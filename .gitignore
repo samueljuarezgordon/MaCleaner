@@ -19,3 +19,6 @@ build/
 
 # Copias de seguridad de Xcode
 *.pbxproj.backup
+
+# Compilaciones para releases
+dist/

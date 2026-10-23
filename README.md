@@ -15,6 +15,7 @@
 
 ## Índice
 
+- [Descargar e instalar](#descargar-e-instalar)
 - [Qué hace](#qué-hace)
 - [Capturas](#capturas)
 - [Modelo de riesgo](#modelo-de-riesgo)
@@ -25,6 +26,28 @@
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Limitaciones conocidas](#limitaciones-conocidas)
 - [Documentación](#documentación)
+
+## Descargar e instalar
+
+### macOS (Apple silicon, macOS 27 o posterior)
+
+1. Descarga `MaCleaner-<versión>-macOS.zip` de la [última release](https://github.com/samueljuarezgordon/MaCleaner/releases/latest).
+2. Descomprímelo y arrastra **MaCleaner.app** a **Aplicaciones**.
+3. Ábrela. Como aún no está notarizada por Apple, la primera vez macOS dirá que no puede verificar al desarrollador:
+   - Pulsa **Aceptar**.
+   - Ve a **Ajustes del Sistema › Privacidad y seguridad** y, abajo, pulsa **Abrir igualmente** junto a MaCleaner.
+   - Confirma con tu contraseña. Solo hace falta la primera vez.
+4. Opcional: en *Mantenimiento y permisos*, concede **Acceso total al disco** e instala el **asistente privilegiado** ([guía](docs/HELPER.md)).
+
+Para comprobar la descarga:
+
+```sh
+shasum -a 256 MaCleaner-*-macOS.zip   # compárala con SHA256SUMS.txt de la release
+```
+
+### iPhone y iPad
+
+Todavía no hay versión en el App Store ni en TestFlight. Para instalarla en tu dispositivo, compílala desde Xcode (ver [Compilar y ejecutar](#compilar-y-ejecutar)) con tu iPhone o iPad conectado.
 
 ## Qué hace
 
