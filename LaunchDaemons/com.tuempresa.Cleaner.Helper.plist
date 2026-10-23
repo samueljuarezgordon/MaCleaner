@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.tuempresa.Cleaner.Helper</string>
+	<!-- Ruta relativa al bundle: launchd ejecuta el binario firmado dentro de MaCleaner.app -->
+	<key>BundleProgram</key>
+	<string>Contents/MacOS/CleanerHelper</string>
+	<key>MachServices</key>
+	<dict>
+		<key>com.tuempresa.Cleaner.Helper</key>
+		<true/>
+	</dict>
+	<!-- Vincula el demonio con la app en Ajustes del Sistema → Ítems de inicio -->
+	<key>AssociatedBundleIdentifiers</key>
+	<array>
+		<string>com.tuempresa.Cleaner</string>
+	</array>
+</dict>
+</plist>

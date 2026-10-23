@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- En macOS el App Group usa el prefijo del Team ID. -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>$(TeamIdentifierPrefix)com.tuempresa.Cleaner</string>
+	</array>
+	<!-- Sin com.apple.security.app-sandbox: el escáner de disco, la sonda de TCC.db
+	     y el registro del demonio privilegiado son incompatibles con el sandbox. -->
+</dict>
+</plist>
