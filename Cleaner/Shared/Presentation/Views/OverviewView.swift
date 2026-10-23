@@ -94,6 +94,10 @@ private struct IdleHero: View {
                 DiskUsageCard(usage: usage)
             }
 
+            #if os(iOS)
+            FolderAccessPrompt()
+            #endif
+
             ModuleGlossary(modules: viewModel.modules)
         }
     }
@@ -304,6 +308,12 @@ private struct InaccessibleBanner: View {
     let categories: Set<CleaningCategory>
     @Binding var destination: SidebarDestination?
 
+    #if os(macOS)
+    static let permissionHint = String(localized: "Concede «Acceso total al disco» para un análisis completo.")
+    #else
+    static let permissionHint = String(localized: "Elige carpetas en Ajustes y permite el acceso a Fotos para un análisis completo.")
+    #endif
+
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             Image(systemName: "lock.fill")
@@ -312,12 +322,15 @@ private struct InaccessibleBanner: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text("Hay zonas que no se pudieron analizar")
                     .font(.headline)
-                Text("Sin permiso para: \(categories.sorted { $0.rawValue < $1.rawValue }.map { String(localized: $0.title) }.formatted(.list(type: .and))). Concede «Acceso total al disco» para un análisis completo.")
+                Text("Sin permiso para: \(categories.sorted { $0.rawValue < $1.rawValue }.map { String(localized: $0.title) }.formatted(.list(type: .and))). \(Self.permissionHint)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 #if os(macOS)
                 Button("Revisar permisos") { destination = .maintenance }
+                    .padding(.top, 4)
+                #else
+                Button("Elegir carpetas o permisos") { destination = .settings }
                     .padding(.top, 4)
                 #endif
             }

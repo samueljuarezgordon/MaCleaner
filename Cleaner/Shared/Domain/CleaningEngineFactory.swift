@@ -6,7 +6,7 @@ nonisolated enum CleaningEngineFactory {
         #if os(macOS)
         MacCleaningEngine()
         #elseif os(iOS)
-        PhotoLibraryEngine()
+        IOSCleaningEngine()
         #else
         #error("Plataforma no soportada")
         #endif

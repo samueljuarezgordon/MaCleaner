@@ -73,6 +73,13 @@ Recolectores:
 
 ## Escaneo en iOS
 
+`IOSCleaningEngine` combina dos motores. Si falta el permiso de uno (Fotos o carpetas), el otro sigue funcionando y sus categorías se marcan como inaccesibles.
+
+- `FilesEngine` recorre con `FileManager.enumerator` las carpetas guardadas en `FolderAccessStore`, activando el permiso de seguridad de cada una. Para limpiar, activa el permiso de todas mientras borra.
+- `PhotoLibraryEngine` se describe a continuación.
+
+`PurgeableSpaceReclaimer` no es una categoría sino una acción de mantenimiento (ver el README). Reserva espacio con `fcntl(F_PREALLOCATE)` en el directorio temporal de la app, sondea `volumeAvailableCapacity` cada 0,5 s y libera la reserva siempre (`defer`), también al cancelarse.
+
 `PhotoLibraryEngine` pide acceso de lectura y escritura a la Fototeca, calcula el tamaño real de cada asset (todos sus recursos) y:
 
 1. Agrupa duplicados con `VNGenerateImageFeaturePrintRequest` + *union-find*, y conserva la copia más pesada.

@@ -1,5 +1,14 @@
 # Historial de cambios
 
+## Sin publicar
+
+### iPhone y iPad
+- **Liberar espacio purgable** («Datos del sistema»): hace que iOS vacíe las cachés de otras apps, los temporales y, con *Optimizar almacenamiento*, la caché de Fotos en iCloud, sin borrar ninguna foto.
+- **iCloud Drive**: libera copias locales sin borrarlas de iCloud.
+- **Archivos grandes y comprimidos** en las carpetas que elijas.
+- Ajustes › Carpetas analizadas, e invitación a elegirlas en la pantalla de inicio.
+- «Consejos» pasa a llamarse «Mantenimiento y consejos».
+
 ## 1.0.2 — 2026-10-23
 
 ### Correcciones

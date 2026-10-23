@@ -83,6 +83,18 @@ Se leen los plist de `~/Library/LaunchAgents`, `/Library/LaunchAgents` y `/Libra
 
 ## iOS / iPadOS
 
+### Carpetas elegidas por el usuario
+
+Solo se analizan las carpetas concedidas en *Ajustes › Carpetas analizadas* (bookmarks de seguridad).
+
+| Categoría | Regla | Riesgo | Borrado |
+|---|---|---|---|
+| Copias locales de iCloud Drive | `isUbiquitousItem` y descargado (`.current`), ≥ 1 MB | Seguro | `evictUbiquitousItem`: sigue en iCloud |
+| Comprimidos e instaladores | `.zip`, `.rar`, `.7z`, `.ipa`, `.dmg`, `.pkg`, `.iso`, `.ipsw`… | Revisar si existe la carpeta descomprimida al lado; si no, Riesgo alto | «Eliminados recientemente» |
+| Archivos grandes | ≥ 100 MB y no está en iCloud | Riesgo alto | «Eliminados recientemente» |
+
+### Fototeca
+
 | Categoría | Riesgo |
 |---|---|
 | Fotos duplicadas | Seguro (se conserva la de mayor calidad) |

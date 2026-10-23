@@ -101,7 +101,7 @@ private struct Sidebar: View {
                 }
                 #else
                 NavigationLink(value: SidebarDestination.tips) {
-                    Label("Consejos de espacio", systemImage: "lightbulb.fill")
+                    Label("Mantenimiento y consejos", systemImage: "wrench.and.screwdriver.fill")
                 }
                 NavigationLink(value: SidebarDestination.settings) {
                     Label("Ajustes", systemImage: "gearshape.fill")

@@ -150,7 +150,12 @@ struct ModuleDetailView: View {
     private var inaccessibleNote: String? {
         let blocked = module.categories.filter(viewModel.inaccessibleCategories.contains)
         guard !blocked.isEmpty else { return nil }
-        return "No se pudo acceder a \(blocked.map { String(localized: $0.title) }.formatted(.list(type: .and))). Concede «Acceso total al disco» y vuelve a analizar."
+        #if os(macOS)
+        let hint = "Concede «Acceso total al disco» y vuelve a analizar."
+        #else
+        let hint = "Elige carpetas en Ajustes (o permite el acceso a Fotos) y vuelve a analizar."
+        #endif
+        return "No se pudo acceder a \(blocked.map { String(localized: $0.title) }.formatted(.list(type: .and))). \(hint)"
     }
 
     /// Grupos con el filtro de riesgo, la búsqueda y el orden aplicados.

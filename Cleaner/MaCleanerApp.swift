@@ -3,6 +3,13 @@ import SwiftUI
 @main struct MaCleanerApp: App {
     @State private var viewModel = CleanerViewModel()
 
+    init() {
+        #if os(iOS)
+        // Si la app se cerró en mitad de una purga de espacio, se libera la reserva.
+        PurgeableSpaceReclaimer.removeLeftoverReservation()
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView(viewModel: viewModel)

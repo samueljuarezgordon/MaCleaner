@@ -40,6 +40,7 @@ extension CleaningModule {
         case .leftovers: [.orange, .pink]
         case .largeFiles: [.yellow, .orange]
         case .trash: [.gray, Color(white: 0.35)]
+        case .iCloudDrive: [.blue, .cyan]
         case .photos: [.green, .teal]
         }
         return LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)

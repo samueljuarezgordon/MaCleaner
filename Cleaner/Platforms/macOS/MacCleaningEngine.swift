@@ -11,7 +11,7 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
     private let helper = HelperClient.shared
 
     var supportedCategories: [CleaningCategory] {
-        CleaningCategory.allCases.filter { $0.module != .photos }
+        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive }
     }
 
     /// Un recolector y las categorías que produce. El orden fija la prioridad en caso de
@@ -156,7 +156,7 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
                     } else {
                         failures.append("\(item.displayName): \(result.message)")
                     }
-                case .privileged, .photoLibrary:
+                case .privileged, .photoLibrary, .evictFromDevice:
                     continue
                 }
             } catch {

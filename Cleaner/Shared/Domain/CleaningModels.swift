@@ -61,6 +61,8 @@ nonisolated enum RemovalMethod: Sendable, Hashable {
     case launchAgent(label: String)
     /// Detiene un agente o demonio de `/Library` y borra su plist con el asistente (macOS).
     case systemLaunchItem(label: String)
+    /// Borra la copia local de un archivo de iCloud Drive; el archivo sigue en iCloud.
+    case evictFromDevice
 
     /// Qué hace la app con el elemento, en lenguaje llano.
     var summary: LocalizedStringResource {
@@ -74,12 +76,13 @@ nonisolated enum RemovalMethod: Sendable, Hashable {
         case .uninstallApp: "La app y sus datos van a la Papelera. Podrás recuperarlos hasta que la vacíes."
         case .launchAgent: "Se detiene ahora y su archivo de configuración va a la Papelera: no volverá a arrancar."
         case .systemLaunchItem: "Se detiene y se borra su archivo de configuración con el asistente privilegiado."
+        case .evictFromDevice: "Se borra solo la copia de este dispositivo. El archivo sigue en iCloud Drive y se vuelve a descargar al abrirlo."
         }
     }
 
     var isRecoverable: Bool {
         switch self {
-        case .moveToTrash, .photoLibrary, .uninstallApp, .launchAgent: true
+        case .moveToTrash, .photoLibrary, .uninstallApp, .launchAgent, .evictFromDevice: true
         case .delete, .privileged, .simulatorDevice, .simulatorRuntime, .systemLaunchItem: false
         }
     }
@@ -122,6 +125,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
     case deviceBackups
     // Papelera
     case trash
+    // iCloud Drive
+    case iCloudDriveDownloads
     // iOS / iPadOS
     case duplicatePhotos
     case largeVideos
@@ -158,6 +163,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .largeFiles: "Archivos grandes"
         case .deviceBackups: "Copias de iPhone y iPad"
         case .trash: "Papelera"
+        case .iCloudDriveDownloads: "Copias locales de iCloud Drive"
         case .duplicatePhotos: "Fotos duplicadas"
         case .largeVideos: "Vídeos grandes"
         case .screenshots: "Capturas de pantalla"
@@ -217,6 +223,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
             "Copias de seguridad locales que hizo el Finder de tus iPhone y iPad."
         case .trash:
             "Elementos que ya enviaste a la Papelera."
+        case .iCloudDriveDownloads:
+            "Archivos de iCloud Drive descargados en este dispositivo. El original está en iCloud: puedes liberar la copia local sin perder nada."
         case .duplicatePhotos:
             "Fotos visualmente idénticas. Se conserva la copia de mayor calidad."
         case .largeVideos:
@@ -271,6 +279,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
             "Si es tu única copia del dispositivo, no podrás restaurarlo desde ella. Comprueba que tienes copia en iCloud."
         case .trash:
             "Ya no podrás recuperar estos elementos."
+        case .iCloudDriveDownloads:
+            "Ninguna pérdida: el archivo sigue en iCloud Drive y en tus otros dispositivos. Se volverá a descargar (necesitas conexión) la próxima vez que lo abras."
         case .duplicatePhotos:
             "Ninguna: se conserva la mejor copia de cada foto."
         case .largeVideos, .screenRecordings:
@@ -307,6 +317,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .largeFiles: "doc.fill"
         case .deviceBackups: "externaldrive.fill.badge.timemachine"
         case .trash: "trash.fill"
+        case .iCloudDriveDownloads: "icloud.and.arrow.down.fill"
         case .duplicatePhotos: "photo.on.rectangle.angled"
         case .largeVideos: "video.fill"
         case .screenshots: "camera.viewfinder"
@@ -334,6 +345,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .appLeftovers: .leftovers
         case .largeFiles, .deviceBackups: .largeFiles
         case .trash: .trash
+        case .iCloudDriveDownloads: .iCloudDrive
         case .duplicatePhotos, .largeVideos, .screenshots, .screenRecordings, .burstPhotos: .photos
         }
     }
@@ -349,6 +361,7 @@ nonisolated enum CleaningModule: String, Sendable, CaseIterable, Identifiable {
     case leftovers
     case largeFiles
     case trash
+    case iCloudDrive
     case photos
 
     var id: String { rawValue }
@@ -363,6 +376,7 @@ nonisolated enum CleaningModule: String, Sendable, CaseIterable, Identifiable {
         case .leftovers: "Restos de apps"
         case .largeFiles: "Archivos grandes"
         case .trash: "Papelera"
+        case .iCloudDrive: "iCloud Drive"
         case .photos: "Fototeca"
         }
     }
@@ -377,6 +391,7 @@ nonisolated enum CleaningModule: String, Sendable, CaseIterable, Identifiable {
         case .leftovers: "Apps que ya no tienes"
         case .largeFiles: "Archivos y copias para revisar"
         case .trash: "Vaciar la Papelera"
+        case .iCloudDrive: "Copias locales que puedes liberar"
         case .photos: "Duplicados, capturas y vídeos"
         }
     }
@@ -391,6 +406,7 @@ nonisolated enum CleaningModule: String, Sendable, CaseIterable, Identifiable {
         case .leftovers: "puzzlepiece.fill"
         case .largeFiles: "externaldrive.fill"
         case .trash: "trash.fill"
+        case .iCloudDrive: "icloud.fill"
         case .photos: "photo.stack.fill"
         }
     }

@@ -8,6 +8,10 @@ struct SettingsView: View {
 
     var body: some View {
         Form {
+            #if os(iOS)
+            FolderAccessSection()
+            #endif
+
             Section {
                 Picker("Seleccionar automáticamente", selection: $defaultSelection) {
                     ForEach(Preferences.DefaultSelection.allCases) { option in
