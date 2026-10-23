@@ -75,6 +75,11 @@ private struct SamplePreview<Content: View>: View {
     }
 }
 
+#Preview("Antes de analizar") {
+    ContentView(viewModel: CleanerViewModel(engine: SampleCleaningEngine()))
+        .frame(width: 1180, height: 1100)
+}
+
 #Preview("Resultados") {
     SamplePreview { ContentView(viewModel: $0) }
         .frame(width: 1100, height: 760)

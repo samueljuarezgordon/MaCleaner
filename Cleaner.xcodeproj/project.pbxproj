@@ -197,10 +197,10 @@
 				};
 			};
 			buildConfigurationList = 000000000000000010000000 /* Build configuration list for PBXProject "Cleaner" */;
-			developmentRegion = en;
+			developmentRegion = es;
 			hasScannedForEncodings = 0;
 			knownRegions = (
-				en,
+				es,
 				Base,
 			);
 			mainGroup = 000000000000000000000001;

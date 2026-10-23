@@ -107,19 +107,26 @@ private struct ModuleGlossary: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Qué se analiza")
                 .font(.headline)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 240), spacing: 16, alignment: .top)], alignment: .leading, spacing: 16) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 240), spacing: 20, alignment: .topLeading)],
+                alignment: .leading,
+                spacing: 18
+            ) {
                 ForEach(modules) { module in
                     HStack(alignment: .top, spacing: 12) {
                         ModuleIcon(module: module, size: 32)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(module.title)
                                 .font(.subheadline.weight(.semibold))
-                            Text(module.categories.map { String(localized: $0.title) }.formatted(.list(type: .and)))
+                            Text(module.subtitle)
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                                 .fixedSize(horizontal: false, vertical: true)
                         }
                     }
+                    // Sin esto, cada celda se centra en su columna y las filas quedan escalonadas.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .help(Text(module.categories.map { String(localized: $0.title) }.formatted(.list(type: .and))))
                     .accessibilityElement(children: .combine)
                 }
             }
