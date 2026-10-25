@@ -92,15 +92,23 @@ Misma interfaz que en el Mac y, dentro de lo que permite el sandbox de iOS:
 
 #### Cómo funciona «Liberar espacio purgable»
 
-1. MaCleaner reserva el espacio libre dentro de su propio contenedor con `F_PREALLOCATE`. No escribe datos ni desgasta el almacenamiento.
-2. iOS ve el almacenamiento casi lleno y purga él mismo las cachés y los originales optimizables.
-3. A medida que iOS libera espacio, se reserva más, hasta que deja de liberar (5 s sin cambios) o pasa un minuto.
-4. La reserva se libera por completo y se mide el espacio ganado de verdad.
+1. MaCleaner llena el espacio libre con un archivo de relleno, por tramos de 256 MB, dentro de su propio contenedor. Usa `F_PREALLOCATE`, que asigna bloques sin escribir datos; si iOS no lo admite, escribe ceros.
+2. Cuando el disco se llena (`ENOSPC`), iOS purga él mismo las cachés y los originales optimizables.
+3. A medida que iOS libera espacio, el archivo crece, hasta que iOS deja de liberar (12 s sin cambios), se alcanza el objetivo elegido o pasan 90 s.
+4. El archivo se borra al instante y se mide el espacio ganado de verdad (`statfs`).
 
-Salvaguardas: siempre deja 700 MB libres; se detiene si la app pasa a segundo plano; borra cualquier reserva que haya quedado al abrir la app.
+Opciones: cuánto liberar (1, 5, 10 o 20 GB, o todo lo posible). Si quieres que entre la caché de Fotos en iCloud, activa *Optimizar almacenamiento*.
+
+Salvaguardas: intenta dejar 300 MB libres; se detiene si la app pasa a segundo plano; borra cualquier archivo de relleno que haya quedado al abrir la app.
+
+#### Otras herramientas de iOS
+
+- **Caché de MaCleaner**: limpia `cachesDirectory` y los temporales de la propia app.
+- **Guías paso a paso**: desinstalar apps pesadas conservando sus datos (*Offload*) y «Mantenimiento profundo» (salto temporal de un año con Modo Avión). Este último es un truco no documentado por Apple: su efecto no está garantizado y, mientras dura, pueden fallar iCloud, Apple Pay o las alarmas.
 
 ### En todas las plataformas
 
+- **Elige qué analizar**: en la pantalla de inicio (o en Ajustes) activa o desactiva módulos y categorías. Puedes volver a analizar un módulo suelto sin perder los resultados del resto.
 - Cada elemento muestra su **riesgo**, **por qué** lo tiene, **qué pasa si lo borras** y **cómo se elimina** (definitivo o recuperable).
 - Hoja de **revisión antes de limpiar**: desglose por riesgo, qué es recuperable y aviso de los elementos de riesgo alto.
 - **Ignorar siempre**: oculta elementos en futuros análisis (se gestiona en Ajustes).

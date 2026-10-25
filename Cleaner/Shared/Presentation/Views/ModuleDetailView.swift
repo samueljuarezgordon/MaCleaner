@@ -84,18 +84,25 @@ struct ModuleDetailView: View {
                 Text(module.categories.first?.explanation ?? "")
             } actions: {
                 if viewModel.phase != .scanning {
-                    Button("Analizar", action: viewModel.startScan)
-                        .buttonStyle(.glassProminent)
+                    Button("Analizar solo \(String(localized: module.title))") {
+                        viewModel.startScan(only: Set(viewModel.supportedCategories(in: module)))
+                    }
+                    .buttonStyle(.glassProminent)
                 } else {
                     ProgressView()
                 }
             }
         } else if viewModel.groups(in: module).isEmpty {
-            ContentUnavailableView(
-                "Nada que limpiar aquí",
-                systemImage: "checkmark.circle",
-                description: Text(inaccessibleNote ?? "No se encontró nada en esta sección.")
-            )
+            ContentUnavailableView {
+                Label("Nada que limpiar aquí", systemImage: "checkmark.circle")
+            } description: {
+                Text(inaccessibleNote ?? "No se encontró nada en esta sección.")
+            } actions: {
+                Button("Analizar solo \(String(localized: module.title))") {
+                    viewModel.startScan(only: Set(viewModel.supportedCategories(in: module)))
+                }
+                .disabled(viewModel.phase == .scanning)
+            }
         } else {
             List(selection: $highlighted) {
                 Section {
@@ -248,6 +255,13 @@ private struct ModuleHeader: View {
                     }
                 }
                 Spacer()
+                Button("Volver a analizar", systemImage: "arrow.clockwise") {
+                    viewModel.startScan(only: Set(viewModel.supportedCategories(in: module)))
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .disabled(viewModel.phase == .scanning || viewModel.phase == .cleaning)
+                .help("Volver a analizar solo \(String(localized: module.title)); el resto de resultados se conserva")
                 Menu("Seleccionar") {
                     Button("Solo lo seguro") { viewModel.select(upTo: .safe, in: module) }
                     Button("Seguro y a revisar") { viewModel.select(upTo: .moderate, in: module) }

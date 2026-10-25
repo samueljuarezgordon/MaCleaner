@@ -8,6 +8,17 @@
 - **Archivos grandes y comprimidos** en las carpetas que elijas.
 - Ajustes › Carpetas analizadas, e invitación a elegirlas en la pantalla de inicio.
 - «Consejos» pasa a llamarse «Mantenimiento y consejos».
+- Guías paso a paso con animaciones: desinstalar apps pesadas (Offload) y «Mantenimiento profundo» (salto temporal), con advertencias.
+- Limpieza de la caché y los temporales de la propia app.
+- Purga: opción de cuánto liberar y explicación de la caché de Fotos en iCloud.
+
+### Todas las plataformas
+- **Qué analizar**: elige módulos y categorías desde la pantalla de inicio o Ajustes. La elección se guarda.
+- Analizar un solo módulo conserva los resultados del resto.
+
+### Correcciones
+- iPad/iPhone: «Liberar espacio purgable» fallaba con «No queda espacio en el dispositivo». Ahora llena por tramos y trata el disco lleno como el objetivo, no como un error.
+- iPad/iPhone: los archivos de iCloud Drive y Archivos salían con 0 bytes porque iOS no informa del tamaño asignado. Ahora se usa el tamaño lógico.
 
 ## 1.0.2 — 2026-10-23
 

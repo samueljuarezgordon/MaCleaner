@@ -90,6 +90,8 @@ private struct Sidebar: View {
                 ForEach(viewModel.modules) { module in
                     NavigationLink(value: SidebarDestination.module(module)) {
                         SidebarModuleRow(module: module, stats: viewModel.stats(for: module), phase: viewModel.phase)
+                            // Los módulos que no se analizan se atenúan.
+                            .opacity(viewModel.scanSelectionState(of: module) == .none ? 0.45 : 1)
                     }
                 }
             }

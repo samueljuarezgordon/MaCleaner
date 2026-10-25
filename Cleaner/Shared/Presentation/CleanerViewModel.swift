@@ -54,6 +54,10 @@ final class CleanerViewModel {
     /// Muestra la hoja de revisión antes de limpiar (desde la barra o el menú).
     var isReviewingClean = false
     private(set) var lastScanDate: Date?
+    /// Categorías que el usuario ha desactivado en «Qué analizar». Se guardan entre sesiones.
+    private(set) var disabledCategories: Set<CleaningCategory> = Preferences.disabledCategories
+    /// Categorías del análisis en curso o del último, en el orden de la barra lateral.
+    private(set) var scanScope: [CleaningCategory] = []
     /// Elementos que el usuario pidió ignorar siempre. Se guardan entre sesiones.
     private(set) var excludedIDs: Set<ScanItem.ID> = Set(UserDefaults.standard.stringArray(forKey: Preferences.exclusionsKey) ?? [])
 
@@ -74,14 +78,23 @@ final class CleanerViewModel {
 
     // MARK: - Escaneo
 
+    /// Analiza las categorías activadas en «Qué analizar».
     func startScan() {
+        startScan(only: enabledCategories)
+    }
+
+    /// Analiza solo `scope`. Los resultados de las demás categorías se conservan.
+    func startScan(only scope: Set<CleaningCategory>) {
+        let scope = scope.intersection(engine.supportedCategories)
+        guard !scope.isEmpty else { return }
         activeTask?.cancel()
         phase = .scanning
         entriesVisited = 0
         bytesFound = 0
         errorMessage = nil
         lastReport = nil
-        categoryStatus = Dictionary(uniqueKeysWithValues: engine.supportedCategories.map { ($0, .pending) })
+        scanScope = modules.flatMap(\.categories).filter(scope.contains)
+        categoryStatus = Dictionary(uniqueKeysWithValues: scanScope.map { ($0, .pending) })
 
         activeTask = Task {
             let (stream, continuation) = AsyncStream.makeStream(
@@ -92,8 +105,8 @@ final class CleanerViewModel {
             async let consumption: Void = consume(stream)
 
             do {
-                let summary = try await engine.scan(progress: continuation)
-                apply(summary)
+                let summary = try await engine.scan(categories: scope, progress: continuation)
+                apply(summary, scope: scope)
                 phase = .results
             } catch is CancellationError {
                 phase = hasResults ? .results : .idle
@@ -207,15 +220,21 @@ final class CleanerViewModel {
         groupsByModule[module]?.flatMap(\.items) ?? []
     }
 
-    private func apply(_ summary: ScanSummary) {
+    private func apply(_ summary: ScanSummary, scope: Set<CleaningCategory>) {
         lastScanDuration = summary.duration
         lastScanDate = .now
         entriesVisited = summary.entriesVisited
-        let visible = summary.items.filter { !excludedIDs.contains($0.id) }
-        apply(items: visible, inaccessible: summary.inaccessibleCategories)
+
+        // Lo que no se ha vuelto a analizar se conserva tal cual, con su selección.
+        let kept = items.filter { !scope.contains($0.category) }
+        let keptSelection = selection.intersection(kept.map(\.id))
+        let fresh = summary.items.filter { !excludedIDs.contains($0.id) }
+        let inaccessible = inaccessibleCategories.subtracting(scope).union(summary.inaccessibleCategories)
+        apply(items: kept + fresh, inaccessible: inaccessible)
+
         // La selección inicial depende de la preferencia del usuario (por defecto, lo seguro).
         let policy = Preferences.defaultSelection
-        selection = Set(visible.filter { item in policy.maxRisk.map { item.risk <= $0 } ?? false }.map(\.id))
+        selection = keptSelection.union(fresh.filter { item in policy.maxRisk.map { item.risk <= $0 } ?? false }.map(\.id))
         updateSelectedStats()
     }
 
@@ -282,11 +301,43 @@ extension CleanerViewModel {
         engine.supportedCategories.filter { categoryStatus[$0] == .scanning }
     }
 
+    /// Categorías que se analizarán al pulsar «Analizar».
+    var enabledCategories: Set<CleaningCategory> {
+        Set(engine.supportedCategories).subtracting(disabledCategories)
+    }
+
+    /// Categorías del motor que pertenecen a `module` (un módulo puede tener categorías de otra
+    /// plataforma).
+    func supportedCategories(in module: CleaningModule) -> [CleaningCategory] {
+        module.categories.filter(engine.supportedCategories.contains)
+    }
+
+    func isEnabled(_ category: CleaningCategory) -> Bool {
+        !disabledCategories.contains(category)
+    }
+
+    func scanSelectionState(of module: CleaningModule) -> SelectionState {
+        let categories = supportedCategories(in: module)
+        let enabled = categories.count(where: isEnabled)
+        if enabled == 0 { return .none }
+        return enabled == categories.count ? .all : .some
+    }
+
+    /// Activa o desactiva categorías en «Qué analizar».
+    func setEnabled(_ isEnabled: Bool, for categories: [CleaningCategory]) {
+        if isEnabled {
+            disabledCategories.subtract(categories)
+        } else {
+            disabledCategories.formUnion(categories)
+        }
+        Preferences.disabledCategories = disabledCategories
+    }
+
     var completedCategoryCount: Int {
         categoryStatus.values.filter { if case .done = $0 { true } else { false } }.count
     }
 
-    var totalCategoryCount: Int { engine.supportedCategories.count }
+    var totalCategoryCount: Int { scanScope.count }
 
     func groups(in module: CleaningModule) -> [CategoryGroup] {
         groupsByModule[module] ?? []
@@ -337,7 +388,7 @@ extension CleanerViewModel {
 extension CleanerViewModel {
     /// Carga resultados de forma síncrona, para las vistas previas.
     func loadForPreview(_ summary: ScanSummary) {
-        apply(summary)
+        apply(summary, scope: Set(engine.supportedCategories))
         phase = .results
     }
 }

@@ -11,7 +11,7 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
     private let helper = HelperClient.shared
 
     var supportedCategories: [CleaningCategory] {
-        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive }
+        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive && $0 != .ownAppCache }
     }
 
     /// Un recolector y las categorías que produce. El orden fija la prioridad en caso de
@@ -47,18 +47,22 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
     // MARK: - Escaneo
 
     @concurrent
-    func scan(progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary {
+    func scan(categories: Set<CleaningCategory>, progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary {
         let clock = ContinuousClock()
         let start = clock.now
         let context = MacScanContext(apps: await InstalledAppIndex.build(), progress: progress)
 
         var results: [Int: [ScanItem]] = [:]
         try await withThrowingTaskGroup(of: (Int, [ScanItem]).self) { group in
+            // Solo se lanzan los recolectores de las categorías elegidas. Un recolector puede
+            // producir varias categorías: lo que no se haya elegido se descarta.
             for (index, job) in Self.jobs.enumerated() {
+                let wanted = job.categories.filter(categories.contains)
+                guard !wanted.isEmpty else { continue }
                 group.addTask {
-                    job.categories.forEach(context.started)
-                    let items = try await job.run(context)
-                    job.categories.forEach { context.finished($0, items: items) }
+                    wanted.forEach(context.started)
+                    let items = try await job.run(context).filter { categories.contains($0.category) }
+                    wanted.forEach { context.finished($0, items: items) }
                     return (index, items)
                 }
             }
@@ -68,11 +72,12 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
         }
 
         let ordered = Self.jobs.indices.flatMap { results[$0] ?? [] }
-        var inaccessible = context.inaccessibleCategories
+        var inaccessible = context.inaccessibleCategories.intersection(categories)
         if inaccessible.contains(.installers) { inaccessible.insert(.compressedArchives) }
         if inaccessible.contains(.largeFiles) { inaccessible.insert(.projectDependencies) }
         if inaccessible.contains(.simulatorDevices) { inaccessible.insert(.simulatorRuntimes) }
         if inaccessible.contains(.unusedApps) { inaccessible.insert(.largeApps) }
+        inaccessible.formIntersection(categories)
 
         return ScanSummary(
             items: Self.removingOverlaps(ordered).sorted { $0.reclaimableBytes > $1.reclaimableBytes },

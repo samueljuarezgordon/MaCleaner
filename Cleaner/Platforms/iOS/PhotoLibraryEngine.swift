@@ -26,77 +26,88 @@ nonisolated struct PhotoLibraryEngine: CleaningEngine {
     // MARK: - Escaneo
 
     @concurrent
-    func scan(progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary {
+    func scan(
+        categories: Set<CleaningCategory>,
+        progress: AsyncStream<ScanProgress>.Continuation
+    ) async throws -> ScanSummary {
+        let wanted = categories.intersection(supportedCategories)
+        let clock = ContinuousClock()
+        let start = clock.now
+        guard !wanted.isEmpty else {
+            return ScanSummary(items: [], entriesVisited: 0, duration: clock.now - start, inaccessibleCategories: [])
+        }
+
         // `.readWrite` porque borrar requiere acceso de escritura.
         let status = await PHPhotoLibrary.requestAuthorization(for: .readWrite)
         guard status == .authorized || status == .limited else { throw EngineError.accessDenied }
 
-        let clock = ContinuousClock()
-        let start = clock.now
         let metrics = ScanMetrics()
         var items: [ScanItem] = []
+        let needsImages = !wanted.isDisjoint(with: [.duplicatePhotos, .screenshots, .burstPhotos])
+        let needsVideos = !wanted.isDisjoint(with: [.largeVideos, .screenRecordings])
 
-        // Fotos duplicadas
-        progress.yield(.started(.duplicatePhotos))
-        let images = Self.fetchAssets(of: .image)
-        let imageInfos = await AssetSizeResolver.infos(for: images, metrics: metrics)
+        // Solo se leen los tamaños de lo que hace falta: con miles de fotos es lo más lento.
+        let images = needsImages ? Self.fetchAssets(of: .image) : []
+        let imageInfos = wanted.isDisjoint(with: [.duplicatePhotos, .screenshots])
+            ? [:] : await AssetSizeResolver.infos(for: images, metrics: metrics)
+        let videos = needsVideos ? Self.fetchAssets(of: .video) : []
+        let videoInfos = needsVideos ? await AssetSizeResolver.infos(for: videos, metrics: metrics) : [:]
         try Task.checkCancellation()
         reportProgress(metrics, to: progress)
 
-        let prints = await detector.featurePrints(for: images)
-        try Task.checkCancellation()
-        let groups = await detector.duplicateGroups(in: prints)
-
-        for group in groups {
-            // Se conserva la copia más pesada (normalmente la de mayor calidad); el resto se
-            // propone para borrar.
-            let ranked = group.sorted {
-                (imageInfos[$0]?.allocatedBytes ?? 0) > (imageInfos[$1]?.allocatedBytes ?? 0)
+        // Fotos duplicadas (Vision): lo más costoso, solo si se ha elegido.
+        if wanted.contains(.duplicatePhotos) {
+            progress.yield(.started(.duplicatePhotos))
+            let prints = await detector.featurePrints(for: images)
+            try Task.checkCancellation()
+            for group in await detector.duplicateGroups(in: prints) {
+                // Se conserva la copia más pesada (normalmente la de mayor calidad).
+                let ranked = group.sorted {
+                    (imageInfos[$0]?.allocatedBytes ?? 0) > (imageInfos[$1]?.allocatedBytes ?? 0)
+                }
+                for identifier in ranked.dropFirst() {
+                    guard let info = imageInfos[identifier] else { continue }
+                    items.append(Self.item(from: info, category: .duplicatePhotos))
+                }
             }
-            for identifier in ranked.dropFirst() {
-                guard let info = imageInfos[identifier] else { continue }
-                items.append(Self.item(from: info, category: .duplicatePhotos))
+            progress.yield(.finished(.duplicatePhotos, bytes: Self.bytes(of: .duplicatePhotos, in: items)))
+        }
+
+        if wanted.contains(.largeVideos) {
+            progress.yield(.started(.largeVideos))
+            items += videoInfos.values
+                .filter { $0.allocatedBytes >= Self.largeVideoThreshold }
+                .map { Self.item(from: $0, category: .largeVideos) }
+            progress.yield(.finished(.largeVideos, bytes: Self.bytes(of: .largeVideos, in: items)))
+        }
+
+        if wanted.contains(.screenshots) {
+            progress.yield(.started(.screenshots))
+            for image in images where image.asset.mediaSubtypes.contains(.photoScreenshot) {
+                guard let info = imageInfos[image.localIdentifier] else { continue }
+                items.append(Self.item(from: info, category: .screenshots))
             }
+            progress.yield(.finished(.screenshots, bytes: Self.bytes(of: .screenshots, in: items)))
         }
 
-        // Vídeos grandes
-        try Task.checkCancellation()
-        progress.yield(.finished(.duplicatePhotos, bytes: items.reduce(0) { $0 + $1.reclaimableBytes }))
-        progress.yield(.started(.largeVideos))
-        let videos = Self.fetchAssets(of: .video)
-        let videoInfos = await AssetSizeResolver.infos(for: videos, metrics: metrics)
-        reportProgress(metrics, to: progress)
-
-        items += videoInfos.values
-            .filter { $0.allocatedBytes >= Self.largeVideoThreshold }
-            .map { Self.item(from: $0, category: .largeVideos) }
-
-        progress.yield(.finished(.largeVideos, bytes: items.filter { $0.category == .largeVideos }.reduce(0) { $0 + $1.reclaimableBytes }))
-
-        // Capturas y grabaciones de pantalla (reutilizan los tamaños ya calculados).
-        try Task.checkCancellation()
-        progress.yield(.started(.screenshots))
-        for image in images where image.asset.mediaSubtypes.contains(.photoScreenshot) {
-            guard let info = imageInfos[image.localIdentifier] else { continue }
-            items.append(Self.item(from: info, category: .screenshots))
+        if wanted.contains(.screenRecordings) {
+            progress.yield(.started(.screenRecordings))
+            for video in videos where video.asset.mediaSubtypes.contains(.videoScreenRecording) {
+                guard let info = videoInfos[video.localIdentifier] else { continue }
+                items.append(Self.item(from: info, category: .screenRecordings))
+            }
+            progress.yield(.finished(.screenRecordings, bytes: Self.bytes(of: .screenRecordings, in: items)))
         }
-        progress.yield(.finished(.screenshots, bytes: Self.bytes(of: .screenshots, in: items)))
-
-        progress.yield(.started(.screenRecordings))
-        for video in videos where video.asset.mediaSubtypes.contains(.videoScreenRecording) {
-            guard let info = videoInfos[video.localIdentifier] else { continue }
-            items.append(Self.item(from: info, category: .screenRecordings))
-        }
-        progress.yield(.finished(.screenRecordings, bytes: Self.bytes(of: .screenRecordings, in: items)))
 
         // Ráfagas: la búsqueda normal solo devuelve la foto representativa de cada una.
-        try Task.checkCancellation()
-        progress.yield(.started(.burstPhotos))
-        let visible = Set(images.map(\.localIdentifier))
-        let extras = Self.fetchBurstExtras(excluding: visible)
-        let extraInfos = await AssetSizeResolver.infos(for: extras, metrics: metrics)
-        items += extraInfos.values.map { Self.item(from: $0, category: .burstPhotos) }
-        progress.yield(.finished(.burstPhotos, bytes: Self.bytes(of: .burstPhotos, in: items)))
+        if wanted.contains(.burstPhotos) {
+            try Task.checkCancellation()
+            progress.yield(.started(.burstPhotos))
+            let extras = Self.fetchBurstExtras(excluding: Set(images.map(\.localIdentifier)))
+            let extraInfos = await AssetSizeResolver.infos(for: extras, metrics: metrics)
+            items += extraInfos.values.map { Self.item(from: $0, category: .burstPhotos) }
+            progress.yield(.finished(.burstPhotos, bytes: Self.bytes(of: .burstPhotos, in: items)))
+        }
         reportProgress(metrics, to: progress)
 
         // Una foto puede ser a la vez duplicada y captura: gana la primera categoría.

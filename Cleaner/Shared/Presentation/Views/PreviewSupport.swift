@@ -4,11 +4,11 @@ import SwiftUI
 /// Motor de ejemplo para las vistas previas: devuelve resultados al instante.
 nonisolated struct SampleCleaningEngine: CleaningEngine {
     var supportedCategories: [CleaningCategory] {
-        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive }
+        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive && $0 != .ownAppCache }
     }
 
-    func scan(progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary {
-        ScanSummary(items: Self.items, entriesVisited: 1_284_512, duration: .seconds(14), inaccessibleCategories: [.mailAttachments])
+    func scan(categories: Set<CleaningCategory>, progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary {
+        ScanSummary(items: Self.items.filter { categories.contains($0.category) }, entriesVisited: 1_284_512, duration: .seconds(14), inaccessibleCategories: [.mailAttachments])
     }
 
     func clean(_ items: [ScanItem]) async throws -> CleaningReport {

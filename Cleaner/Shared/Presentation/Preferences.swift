@@ -6,6 +6,18 @@ nonisolated enum Preferences {
     static let defaultSelectionKey = "defaultSelection"
     static let skipTrashKey = "skipTrashByDefault"
     static let sortOrderKey = "itemSortOrder"
+    static let disabledCategoriesKey = "disabledScanCategories"
+
+    /// Categorías que el usuario ha decidido no analizar. Se guardan las desactivadas (y no
+    /// las activadas) para que las categorías nuevas de futuras versiones vengan activadas.
+    static var disabledCategories: Set<CleaningCategory> {
+        get {
+            Set((UserDefaults.standard.stringArray(forKey: disabledCategoriesKey) ?? []).compactMap(CleaningCategory.init(rawValue:)))
+        }
+        set {
+            UserDefaults.standard.set(newValue.map(\.rawValue).sorted(), forKey: disabledCategoriesKey)
+        }
+    }
 
     /// Qué se marca automáticamente al terminar un análisis.
     enum DefaultSelection: String, CaseIterable, Identifiable {

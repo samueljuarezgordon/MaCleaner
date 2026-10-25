@@ -54,7 +54,8 @@ struct ScanToolbarButton: View {
             Button("Detener", systemImage: "stop.fill", action: viewModel.cancel)
         } else {
             Button(viewModel.hasResults ? "Volver a analizar" : "Analizar", systemImage: "arrow.clockwise", action: viewModel.startScan)
-                .disabled(viewModel.phase == .cleaning)
+                .disabled(viewModel.phase == .cleaning || viewModel.enabledCategories.isEmpty)
+                .help(viewModel.enabledCategories.isEmpty ? "No hay nada elegido para analizar" : "Analizar lo elegido (⌘R)")
         }
     }
 }
@@ -89,6 +90,13 @@ private struct IdleHero: View {
             .buttonStyle(.glassProminent)
             .controlSize(.extraLarge)
             .keyboardShortcut(.defaultAction)
+            .disabled(viewModel.enabledCategories.isEmpty)
+
+            if viewModel.enabledCategories.isEmpty {
+                Text("Elige abajo qué quieres analizar.")
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+            }
 
             if let usage = viewModel.diskUsage {
                 DiskUsageCard(usage: usage)
@@ -98,46 +106,131 @@ private struct IdleHero: View {
             FolderAccessPrompt()
             #endif
 
-            ModuleGlossary(modules: viewModel.modules)
+            ModuleGlossary(viewModel: viewModel)
         }
     }
 }
 
-/// Lista de lo que se analiza, para que el usuario sepa qué esperar.
+/// Selector de qué se analiza: un toque activa o desactiva un módulo y su menú permite
+/// elegir categoría por categoría. La elección se guarda entre sesiones.
 private struct ModuleGlossary: View {
-    let modules: [CleaningModule]
+    let viewModel: CleanerViewModel
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Qué se analiza")
-                .font(.headline)
+            HStack {
+                Text("Qué analizar")
+                    .font(.headline)
+                Spacer()
+                Button("Todo") { viewModel.setEnabled(true, for: allCategories) }
+                    .disabled(viewModel.disabledCategories.isDisjoint(with: allCategories))
+                Button("Nada") { viewModel.setEnabled(false, for: allCategories) }
+                    .disabled(viewModel.enabledCategories.isEmpty)
+            }
+            .buttonStyle(.borderless)
+
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 240), spacing: 20, alignment: .topLeading)],
                 alignment: .leading,
                 spacing: 18
             ) {
-                ForEach(modules) { module in
-                    HStack(alignment: .top, spacing: 12) {
-                        ModuleIcon(module: module, size: 32)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(module.title)
-                                .font(.subheadline.weight(.semibold))
-                            Text(module.subtitle)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                    // Sin esto, cada celda se centra en su columna y las filas quedan escalonadas.
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .help(Text(module.categories.map { String(localized: $0.title) }.formatted(.list(type: .and))))
-                    .accessibilityElement(children: .combine)
+                ForEach(viewModel.modules) { module in
+                    ScopeModuleCell(viewModel: viewModel, module: module)
+                        // Sin esto, cada celda se centra en su columna y las filas quedan escalonadas.
+                        .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
+
+            Text("Se analizarán \(viewModel.enabledCategories.count) de \(allCategories.count) categorías. Toca un módulo para incluirlo o quitarlo; usa su menú para elegir partes concretas.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(in: .rect(cornerRadius: 20))
+    }
+
+    private var allCategories: [CleaningCategory] {
+        viewModel.modules.flatMap(viewModel.supportedCategories(in:))
+    }
+}
+
+private struct ScopeModuleCell: View {
+    let viewModel: CleanerViewModel
+    let module: CleaningModule
+
+    var body: some View {
+        let state = viewModel.scanSelectionState(of: module)
+        let categories = viewModel.supportedCategories(in: module)
+        HStack(alignment: .top, spacing: 12) {
+            Button {
+                viewModel.setEnabled(state != .all, for: categories)
+            } label: {
+                HStack(alignment: .top, spacing: 12) {
+                    ModuleIcon(module: module, size: 32)
+                        .saturation(state == .none ? 0 : 1)
+                        .opacity(state == .none ? 0.5 : 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(module.title)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(state == .none ? .secondary : .primary)
+                        Text(subtitle(state: state, categories: categories))
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    Spacer(minLength: 4)
+                    Image(systemName: symbol(for: state))
+                        .font(.title3)
+                        .foregroundStyle(state == .none ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.tint))
+                        .contentTransition(.symbolEffect(.replace))
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(Text(module.title))
+            .accessibilityValue(Text(state == .none ? "No se analiza" : state == .all ? "Se analiza" : "Se analiza en parte"))
+
+            if categories.count > 1 {
+                Menu {
+                    ForEach(categories) { category in
+                        Toggle(isOn: Binding(
+                            get: { viewModel.isEnabled(category) },
+                            set: { viewModel.setEnabled($0, for: [category]) }
+                        )) {
+                            Label {
+                                Text(category.title)
+                            } icon: {
+                                Image(systemName: category.systemImage)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "ellipsis.circle")
+                        .foregroundStyle(.secondary)
+                }
+                .menuIndicator(.hidden)
+                .fixedSize()
+                .help("Elegir qué partes de \(String(localized: module.title)) analizar")
+            }
+        }
+    }
+
+    private func subtitle(state: CleanerViewModel.SelectionState, categories: [CleaningCategory]) -> String {
+        switch state {
+        case .all: String(localized: module.subtitle)
+        case .none: String(localized: "No se analizará")
+        case .some:
+            String(localized: "Solo \(categories.filter(viewModel.isEnabled).map { String(localized: $0.title) }.formatted(.list(type: .and)))")
+        }
+    }
+
+    private func symbol(for state: CleanerViewModel.SelectionState) -> String {
+        switch state {
+        case .all: "checkmark.circle.fill"
+        case .some: "minus.circle.fill"
+        case .none: "circle"
+        }
     }
 }
 
@@ -164,7 +257,7 @@ private struct ScanningHero: View {
             }
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
-                ForEach(viewModel.modules.flatMap(\.categories)) { category in
+                ForEach(viewModel.scanScope) { category in
                     CategoryProgressRow(category: category, status: viewModel.categoryStatus[category] ?? .pending)
                 }
             }
@@ -385,7 +478,11 @@ private struct ModuleCard: View {
     }
 
     private func summary(_ stats: CleanerViewModel.ModuleStats) -> String {
-        guard stats.itemCount > 0 else { return String(localized: "Nada que limpiar") }
+        guard stats.itemCount > 0 else {
+            return viewModel.scanSelectionState(of: module) == .none
+                ? String(localized: "No analizado")
+                : String(localized: "Nada que limpiar")
+        }
         return module.measuresSpace ? stats.totalBytes.byteString : String(localized: "\(stats.itemCount) procesos")
     }
 }

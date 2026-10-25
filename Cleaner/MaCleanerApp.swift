@@ -42,7 +42,7 @@ struct CleanerCommands: Commands {
         CommandMenu("Limpieza") {
             Button(viewModel.hasResults ? "Volver a analizar" : "Analizar", action: viewModel.startScan)
                 .keyboardShortcut("r")
-                .disabled(viewModel.phase == .scanning || viewModel.phase == .cleaning)
+                .disabled(viewModel.phase == .scanning || viewModel.phase == .cleaning || viewModel.enabledCategories.isEmpty)
             Button("Detener análisis", action: viewModel.cancel)
                 .keyboardShortcut(".")
                 .disabled(viewModel.phase != .scanning)

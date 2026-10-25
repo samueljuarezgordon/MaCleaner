@@ -16,16 +16,21 @@ nonisolated struct FilesEngine: Sendable {
     ]
 
     private static let keys: [URLResourceKey] = [
-        .isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey,
+        .isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .totalFileSizeKey, .fileSizeKey,
         .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey, .contentModificationDateKey,
     ]
 
     /// `nil` si el usuario no ha concedido ninguna carpeta.
     @concurrent
-    func scan(progress: AsyncStream<ScanProgress>.Continuation, metrics: ScanMetrics) async throws -> [ScanItem]? {
+    func scan(
+        categories: Set<CleaningCategory>,
+        progress: AsyncStream<ScanProgress>.Continuation,
+        metrics: ScanMetrics
+    ) async throws -> [ScanItem]? {
         let folders = FolderAccessStore.folders()
         guard !folders.isEmpty else { return nil }
-        Self.categories.forEach { progress.yield(.started($0)) }
+        let wanted = Self.categories.filter(categories.contains)
+        wanted.forEach { progress.yield(.started($0)) }
 
         var items: [ScanItem] = []
         for folder in folders {
@@ -37,7 +42,8 @@ nonisolated struct FilesEngine: Sendable {
             progress.yield(.metrics(entriesVisited: snapshot.entriesVisited, bytes: items.reduce(0) { $0 + $1.reclaimableBytes }))
         }
 
-        for category in Self.categories {
+        items = items.filter { categories.contains($0.category) }
+        for category in wanted {
             progress.yield(.finished(category, bytes: items.filter { $0.category == category }.reduce(0) { $0 + $1.reclaimableBytes }))
         }
         return items
@@ -66,7 +72,11 @@ nonisolated struct FilesEngine: Sendable {
 
         var items: [ScanItem] = []
         for (url, values) in files {
-            let bytes = Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
+            // En iCloud Drive y otros proveedores de Archivos, iOS a menudo no informa del
+            // tamaño asignado: se usa entonces el tamaño lógico.
+            let allocated = Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
+            let logical = Int64(values.totalFileSize ?? values.fileSize ?? 0)
+            let bytes = allocated > 0 ? allocated : logical
             metrics.record(entries: 1, allocated: bytes, reclaimable: bytes)
             guard bytes > 0 else { continue }
 

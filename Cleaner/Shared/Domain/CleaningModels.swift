@@ -97,6 +97,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
     case systemCaches
     case userLogs
     case systemLogs
+    case ownAppCache
     // Desarrollo
     case xcodeDerivedData
     case xcodeDeviceSupport
@@ -143,6 +144,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .systemCaches: "Cachés del sistema"
         case .userLogs: "Registros de usuario"
         case .systemLogs: "Registros del sistema"
+        case .ownAppCache: "Caché de MaCleaner"
         case .xcodeDerivedData: "DerivedData de Xcode"
         case .xcodeDeviceSupport: "Soporte de dispositivos"
         case .xcodeArchives: "Archivos de Xcode"
@@ -183,6 +185,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
             "Cachés compartidas de macOS y de servicios del sistema. Requieren el asistente privilegiado."
         case .userLogs, .systemLogs:
             "Registros de actividad y de fallos. Solo sirven para diagnosticar problemas antiguos."
+        case .ownAppCache:
+            "Archivos temporales y cachés que la propia MaCleaner ha creado (miniaturas, restos de análisis)."
         case .xcodeDerivedData:
             "Productos intermedios de compilación de Xcode. La siguiente compilación tardará algo más."
         case .xcodeDeviceSupport:
@@ -243,6 +247,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         switch self {
         case .userCaches, .appCaches, .systemCaches:
             "Las apps pueden ir algo más lentas la primera vez que las abras mientras reconstruyen su caché."
+        case .ownAppCache:
+            "Ninguna: MaCleaner los vuelve a crear si los necesita."
         case .userLogs, .systemLogs:
             "Ninguna. Solo perderás el historial para diagnosticar fallos pasados."
         case .xcodeDerivedData:
@@ -297,6 +303,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .userCaches, .systemCaches: "archivebox.fill"
         case .appCaches: "app.badge.fill"
         case .userLogs, .systemLogs: "doc.text.fill"
+        case .ownAppCache: "sparkles"
         case .xcodeDerivedData: "hammer.fill"
         case .xcodeDeviceSupport: "iphone.gen3"
         case .xcodeArchives: "shippingbox.fill"
@@ -336,7 +343,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
 
     var module: CleaningModule {
         switch self {
-        case .userCaches, .appCaches, .systemCaches, .userLogs, .systemLogs, .mailAttachments: .systemJunk
+        case .userCaches, .appCaches, .systemCaches, .userLogs, .systemLogs, .mailAttachments, .ownAppCache: .systemJunk
         case .xcodeDerivedData, .xcodeDeviceSupport, .xcodeArchives, .xcodeCaches, .simulatorDevices,
              .simulatorRuntimes, .simulatorCaches, .packageCaches, .projectDependencies: .developer
         case .installers, .compressedArchives: .downloads
@@ -476,8 +483,8 @@ nonisolated enum ScanProgress: Sendable {
 nonisolated protocol CleaningEngine: Sendable {
     var supportedCategories: [CleaningCategory] { get }
 
-    /// Realiza el escaneo emitiendo progreso en `progress`. El motor no cierra el stream.
-    func scan(progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary
+    /// Analiza solo `categories`, emitiendo progreso en `progress`. El motor no cierra el stream.
+    func scan(categories: Set<CleaningCategory>, progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary
 
     /// Elimina los elementos indicados según su `removal`.
     func clean(_ items: [ScanItem]) async throws -> CleaningReport

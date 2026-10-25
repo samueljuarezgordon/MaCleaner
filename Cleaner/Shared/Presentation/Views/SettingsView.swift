@@ -13,6 +13,40 @@ struct SettingsView: View {
             #endif
 
             Section {
+                ForEach(viewModel.modules) { module in
+                    DisclosureGroup {
+                        ForEach(viewModel.supportedCategories(in: module)) { category in
+                            Toggle(isOn: Binding(
+                                get: { viewModel.isEnabled(category) },
+                                set: { viewModel.setEnabled($0, for: [category]) }
+                            )) {
+                                Label {
+                                    Text(category.title)
+                                } icon: {
+                                    Image(systemName: category.systemImage)
+                                }
+                            }
+                        }
+                    } label: {
+                        Toggle(isOn: Binding(
+                            get: { viewModel.scanSelectionState(of: module) != .none },
+                            set: { viewModel.setEnabled($0, for: viewModel.supportedCategories(in: module)) }
+                        )) {
+                            Label {
+                                Text(module.title)
+                            } icon: {
+                                Image(systemName: module.systemImage)
+                            }
+                        }
+                    }
+                }
+            } header: {
+                Text("Qué analizar")
+            } footer: {
+                Text("Lo que desactives no se analiza al pulsar «Analizar». Puedes analizar un módulo suelto desde su pantalla; el resto de resultados se conserva.")
+            }
+
+            Section {
                 Picker("Seleccionar automáticamente", selection: $defaultSelection) {
                     ForEach(Preferences.DefaultSelection.allCases) { option in
                         Text(option.title).tag(option)
