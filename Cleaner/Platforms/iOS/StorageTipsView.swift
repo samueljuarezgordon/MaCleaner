@@ -65,7 +65,7 @@ struct StorageTipsView: View {
     @State private var guide: GuideKind?
 
     private enum GuideKind: String, Identifiable {
-        case offload, timeJump
+        case offload
         var id: Self { self }
     }
 
@@ -79,15 +79,8 @@ struct StorageTipsView: View {
                 } label: {
                     GuideRow(title: "Desinstalar apps pesadas sin perder datos", subtitle: "Guía paso a paso de «Desinstalar app» (Offload)", systemImage: "icloud.and.arrow.down", tint: .blue)
                 }
-                Button {
-                    guide = .timeJump
-                } label: {
-                    GuideRow(title: "Mantenimiento profundo: salto temporal", subtitle: "Truco no oficial para que iOS caduque cachés antiguas", systemImage: "clock.arrow.2.circlepath", tint: .purple)
-                }
             } header: {
                 Text("Guías")
-            } footer: {
-                Text("El salto temporal no está documentado por Apple y tiene efectos secundarios. Lee las advertencias de la guía antes de probarlo.")
             }
 
             Section {
@@ -133,8 +126,6 @@ struct StorageTipsView: View {
             switch kind {
             case .offload:
                 GuidedStepsView(title: "Desinstalar apps pesadas", tint: .blue, steps: Guides.offload)
-            case .timeJump:
-                GuidedStepsView(title: "Mantenimiento profundo", tint: .purple, steps: Guides.timeJump, warnings: Guides.timeJumpWarnings)
             }
         }
     }

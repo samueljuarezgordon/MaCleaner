@@ -8,7 +8,7 @@
 - **Archivos grandes y comprimidos** en las carpetas que elijas.
 - Ajustes › Carpetas analizadas, e invitación a elegirlas en la pantalla de inicio.
 - «Consejos» pasa a llamarse «Mantenimiento y consejos».
-- Guías paso a paso con animaciones: desinstalar apps pesadas (Offload) y «Mantenimiento profundo» (salto temporal), con advertencias.
+- Guía paso a paso con animaciones para desinstalar apps pesadas (Offload).
 - Limpieza de la caché y los temporales de la propia app.
 - Purga: opción de cuánto liberar y explicación de la caché de Fotos en iCloud.
 

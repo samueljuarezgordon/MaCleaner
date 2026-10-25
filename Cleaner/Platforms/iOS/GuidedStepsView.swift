@@ -124,25 +124,5 @@ enum Guides {
         GuideStep(systemImage: "arrow.down.app.fill", title: "Recupérala cuando quieras",
                   detail: "Toca el icono y se vuelve a descargar con todos tus datos. Si quieres que iOS lo haga solo, activa «Desinstalar apps sin usar» en esa misma pantalla."),
     ]
-
-    /// Truco del salto temporal para que iOS dé por caducadas cachés antiguas.
-    static let timeJump: [GuideStep] = [
-        GuideStep(systemImage: "airplane", title: "Activa el Modo Avión",
-                  detail: "Desde el Centro de control. Así ninguna app ni servicio de iCloud se sincroniza con la fecha falsa."),
-        GuideStep(systemImage: "clock.badge.xmark", title: "Desactiva la hora automática",
-                  detail: "Ajustes › General › Fecha y hora › desactiva «Ajustar automáticamente». Si no te deja, desactiva antes Tiempo de uso o la restricción correspondiente."),
-        GuideStep(systemImage: "calendar.badge.plus", title: "Adelanta la fecha un año",
-                  detail: "Toca la fecha y avanza el año. No cambies nada más."),
-        GuideStep(systemImage: "internaldrive.fill", title: "Abre Almacenamiento y espera",
-                  detail: "Ve a Ajustes › General › Almacenamiento y espera uno o dos minutos con la pantalla encendida. iOS puede dar por caducadas cachés con fecha de expiración."),
-        GuideStep(systemImage: "arrow.uturn.backward.circle.fill", title: "Vuelve a la fecha real",
-                  detail: "Activa de nuevo «Ajustar automáticamente», desactiva el Modo Avión y reinicia el dispositivo. No te saltes este paso."),
-    ]
-
-    static let timeJumpWarnings: [LocalizedStringResource] = [
-        "Es un truco no documentado por Apple: el resultado no está garantizado y a menudo es pequeño.",
-        "Mientras la fecha es falsa pueden fallar iCloud, Apple Pay, el inicio de sesión con doble factor, las alarmas y las suscripciones. Vuelve siempre a la fecha automática.",
-        "Prueba antes «Liberar espacio purgable»: es más seguro y suele liberar más.",
-    ]
 }
 #endif

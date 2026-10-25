@@ -104,7 +104,7 @@ Salvaguardas: intenta dejar 300 MB libres; se detiene si la app pasa a segundo p
 #### Otras herramientas de iOS
 
 - **Caché de MaCleaner**: limpia `cachesDirectory` y los temporales de la propia app.
-- **Guías paso a paso**: desinstalar apps pesadas conservando sus datos (*Offload*) y «Mantenimiento profundo» (salto temporal de un año con Modo Avión). Este último es un truco no documentado por Apple: su efecto no está garantizado y, mientras dura, pueden fallar iCloud, Apple Pay o las alarmas.
+- **Guía paso a paso**: desinstalar apps pesadas conservando sus datos (*Offload*).
 
 ### En todas las plataformas
 
