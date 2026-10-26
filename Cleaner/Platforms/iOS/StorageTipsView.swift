@@ -27,7 +27,7 @@ struct StorageTipsView: View {
         ),
         Tip(
             id: "recentlyDeleted", title: "Vaciar «Eliminados recientemente»", systemImage: "trash", tint: .red, risk: .moderate,
-            whatIsDeleted: "Las fotos y vídeos que borraste en los últimos 30 días, incluidos los que borra MaCleaner.",
+            whatIsDeleted: "Las fotos y vídeos que borraste en los últimos 30 días.",
             purpose: "Te permite recuperar lo que borraste por error.",
             afterwards: "El espacio se libera al momento, pero ya no podrás recuperarlos.",
             steps: "Fotos › Colecciones › Eliminados recientemente › Seleccionar › Eliminar todo."
@@ -219,18 +219,14 @@ final class PurgeableSpaceModel {
 
     func start(target: Int64?) {
         guard phase != .running else { return }
-        let before = PurgeableSpaceReclaimer.available()
         phase = .running
         progress = nil
         task = Task {
             do {
-                try await PurgeableSpaceReclaimer.run(target: target) { progress in
+                let outcome = try await PurgeableSpaceReclaimer.run(target: target) { progress in
                     Task { @MainActor in self.progress = progress }
                 }
-                // Se deja un momento para que iOS termine de contabilizar lo liberado.
-                try? await Task.sleep(for: .seconds(1))
-                let after = PurgeableSpaceReclaimer.available()
-                phase = .finished(freedBytes: max(0, after - before))
+                phase = .finished(freedBytes: outcome.freedBytes)
             } catch {
                 phase = .failed(error.localizedDescription)
             }
@@ -286,7 +282,7 @@ private struct PurgeableSpaceSection: View {
                 ExplanationRow(title: "Qué se borra", systemImage: "trash.circle.fill", text: Text("Lo que iOS marca como purgable: cachés de otras apps, archivos temporales, cachés de streaming y, si tienes «Optimizar almacenamiento» en Fotos, los originales que ya están en iCloud."), tint: .red)
                 ExplanationRow(title: "Para qué servía", systemImage: "questionmark.circle.fill", text: Text("Que las apps abran más rápido y que las fotos se vean a máxima calidad sin conexión."), tint: .blue)
                 ExplanationRow(title: "Qué pasa después", systemImage: "arrow.uturn.backward.circle.fill", text: Text("No se borra ninguna foto ni documento: tus fotos siguen en iCloud. Las apps reconstruyen sus cachés y los originales se vuelven a descargar al abrirlos."), tint: .orange)
-                ExplanationRow(title: "Cómo funciona", systemImage: "gearshape.2.fill", text: Text("Ninguna app puede borrar cachés ajenas en iOS. MaCleaner llena el espacio libre con un archivo temporal hasta que el almacenamiento está lleno; entonces iOS purga él mismo. Cuando deja de liberar, el archivo se borra al instante. Intenta dejar \(PurgeableSpaceReclaimer.safetyFloor.byteString) libres."), tint: .gray)
+                ExplanationRow(title: "Cómo funciona", systemImage: "gearshape.2.fill", text: Text("Ninguna app puede borrar cachés ajenas en iOS. MaCleaner pide más espacio del que hay libre, como el truco de «alquilar una película enorme», y iOS purga él mismo para atender la petición. Lo repite por oleadas mientras iOS siga liberando y borra su archivo temporal al instante al terminar."), tint: .gray)
 
                 if model.phase != .running {
                     PurgeOptions(targetGigabytes: $targetGigabytes)
@@ -298,14 +294,14 @@ private struct PurgeableSpaceSection: View {
                         ProgressView()
                         if let progress = model.progress {
                             Text(progress.reachedFull
-                                 ? "Almacenamiento lleno: esperando a que iOS purgue…"
-                                 : "Llenando el espacio libre…")
+                                 ? "Oleada \(progress.wave): almacenamiento lleno, iOS está purgando…"
+                                 : "Oleada \(progress.wave): llenando el espacio libre…")
                                 .font(.callout)
                             Text("Archivo de relleno \(progress.reservedBytes.byteString) · iOS ha liberado ≈ \(progress.purgedBytes.byteString)")
                                 .font(.caption.monospacedDigit())
                                 .foregroundStyle(.secondary)
                         }
-                        Text("Mantén MaCleaner abierta. Tarda hasta minuto y medio.")
+                        Text("Mantén MaCleaner abierta y en pantalla. Tarda entre 1 y 5 minutos.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                         Button("Detener", role: .cancel, action: model.cancel)
@@ -340,7 +336,7 @@ private struct PurgeableSpaceSection: View {
         .confirmationDialog("¿Liberar espacio purgable?", isPresented: $isConfirming, titleVisibility: .visible) {
             Button("Liberar espacio") { model.start(target: targetBytes) }
         } message: {
-            Text("Durante hasta minuto y medio el almacenamiento estará lleno y iOS puede mostrar el aviso «Almacenamiento casi lleno»: es normal. No hagas fotos ni descargues nada mientras tanto. No se borra ninguna foto ni documento.")
+            Text("Durante unos minutos el almacenamiento estará lleno y iOS puede mostrar el aviso «Almacenamiento casi lleno»: es normal. No hagas fotos ni descargues nada mientras tanto. No se borra ninguna foto ni documento.")
         }
         .onChange(of: scenePhase) { _, phase in
             // Si la app pasa a segundo plano, se libera la reserva al momento.

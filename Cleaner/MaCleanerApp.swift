@@ -2,11 +2,13 @@ import SwiftUI
 
 @main struct MaCleanerApp: App {
     @State private var viewModel = CleanerViewModel()
+    @Environment(\.scenePhase) private var scenePhase
 
     init() {
         #if os(iOS)
         // Si la app se cerró en mitad de una purga de espacio, se libera la reserva.
         PurgeableSpaceReclaimer.removeLeftoverReservation()
+        BackgroundScanSession.register()
         #endif
     }
 
@@ -15,6 +17,11 @@ import SwiftUI
             ContentView(viewModel: viewModel)
                 #if os(macOS)
                 .frame(minWidth: 900, minHeight: 600)
+                #else
+                .onChange(of: scenePhase) { _, phase in
+                    // Nunca se deja el almacenamiento lleno con la app fuera de la pantalla.
+                    if phase == .background { PurgeableSpaceReclaimer.abortIfRunning() }
+                }
                 #endif
         }
         #if os(macOS)

@@ -45,9 +45,14 @@ Para comprobar la descarga:
 shasum -a 256 MaCleaner-*-macOS.zip   # compárala con SHA256SUMS.txt de la release
 ```
 
-### iPhone y iPad
+### iPhone y iPad (iOS / iPadOS 27 o posterior)
 
-Todavía no hay versión en el App Store ni en TestFlight. Para instalarla en tu dispositivo, compílala desde Xcode (ver [Compilar y ejecutar](#compilar-y-ejecutar)) con tu iPhone o iPad conectado.
+Todavía no hay versión en el App Store ni en TestFlight. La release incluye `MaCleaner-<versión>-iOS.ipa`, una sola app universal para iPhone y iPad, **sin firmar**. Hay dos formas de instalarla:
+
+- **Con Sideloadly o AltStore** (sin Xcode): abre la IPA con la herramienta, inicia sesión con tu Apple ID y la firmará e instalará en el dispositivo conectado. Con un Apple ID gratuito la firma caduca a los 7 días y hay que repetirlo.
+- **Con Xcode**: compílala con tu iPhone o iPad conectado (ver [Compilar y ejecutar](#compilar-y-ejecutar)).
+
+La primera vez, iOS pide confiar en el desarrollador: *Ajustes › General › VPN y gestión de dispositivos*. Además hay que activar el *Modo de desarrollador*: *Ajustes › Privacidad y seguridad*.
 
 ## Qué hace
 
@@ -74,37 +79,33 @@ Todavía no hay versión en el App Store ni en TestFlight. Para instalarla en tu
 
 ### iPadOS e iOS
 
-Misma interfaz que en el Mac y, dentro de lo que permite el sandbox de iOS:
+Misma interfaz que en el Mac, centrada en lo único que el sandbox de iOS deja hacer de verdad con los **Datos del sistema**: conseguir que iOS los purgue.
 
-| Módulo | Qué hace |
+| Dónde | Qué hace |
 |---|---|
-| **Liberar espacio purgable** (Mantenimiento) | Hace que iOS vacíe lo que considera purgable: cachés de otras apps, temporales, cachés de streaming y, con *Optimizar almacenamiento* activado, **los originales de Fotos en iCloud que ya están en la nube**. No borra ninguna foto ni documento. |
-| **iCloud Drive** | Copias locales de archivos de iCloud Drive. Se liberan con `evictUbiquitousItem`: el archivo sigue en iCloud y se vuelve a descargar al abrirlo. |
-| **Archivos grandes** y **Descargas** | Archivos de más de 100 MB, comprimidos e instaladores en las carpetas que elijas (En mi iPhone, Descargas, iCloud Drive…). Van a «Eliminados recientemente» de Archivos. |
-| **Fototeca** | Fotos duplicadas (Vision), vídeos grandes, capturas y grabaciones de pantalla y fotos descartadas de ráfagas. |
-| **Consejos** | Lo que solo se puede hacer desde Ajustes (descargar apps sin usar, Mensajes, Safari…), con el formato *qué se borra / para qué servía / qué pasa después*. |
+| **Basura del sistema** (análisis y limpieza normales) | **Datos del sistema purgables**: la cifra que iOS considera prescindible (cachés de otras apps y de Safari, temporales, streaming, restos de actualizaciones y, con *Optimizar almacenamiento*, los originales de Fotos que ya están en iCloud). Al limpiar, iOS los purga. No se borra ninguna foto ni documento. También limpia la **caché de MaCleaner**. |
+| **Mantenimiento y consejos** | La misma purga, con un objetivo (1, 5, 10 o 20 GB, o todo lo posible). Consejos de lo que solo se puede hacer desde Ajustes (descargar apps sin usar, Mensajes, Safari…) con el formato *qué se borra / para qué servía / qué pasa después*, y una guía paso a paso para desinstalar apps pesadas sin perder sus datos (*Offload*). |
+
+Al pulsar **Limpiar**, la app vuelve a la pantalla principal para mostrar el progreso. La pantalla no se bloquea mientras analiza o limpia.
+
+> **Fototeca, iCloud Drive, archivos grandes y comprimidos** están desactivados en la 1.1.0: en dispositivos reales su análisis no terminaba. El código sigue en el proyecto (`IOSCleaningEngine.includesPhotosAndFiles`) para retomarlo.
 
 #### Qué no puede hacer ninguna app en iOS
 
-- **Ver o borrar una a una las cachés de otras apps o los «Datos del sistema».** Cada app vive en su sandbox. MaCleaner consigue el mismo efecto pidiendo a iOS que purgue (ver abajo).
-- **Borrar solo la caché de Fotos en iCloud.** PhotoKit no tiene ninguna función para descartar la copia local. Con *Ajustes › Apps › Fotos › Optimizar almacenamiento* activado, la purga de espacio la libera.
+- **Ver o borrar una a una las cachés de otras apps o los «Datos del sistema».** Cada app vive en su sandbox. MaCleaner consigue el efecto pidiendo a iOS que purgue (ver abajo).
+- **Borrar lo que iOS no marca como purgable**: registros del sistema, índices, voces de Siri… Eso solo lo gestiona iOS.
 - **Desinstalar apps o gestionar procesos de inicio.**
 
-#### Cómo funciona «Liberar espacio purgable»
+#### Cómo funciona la purga de los Datos del sistema
 
-1. MaCleaner llena el espacio libre con un archivo de relleno, por tramos de 256 MB, dentro de su propio contenedor. Usa `F_PREALLOCATE`, que asigna bloques sin escribir datos; si iOS no lo admite, escribe ceros.
-2. Cuando el disco se llena (`ENOSPC`), iOS purga él mismo las cachés y los originales optimizables.
-3. A medida que iOS libera espacio, el archivo crece, hasta que iOS deja de liberar (12 s sin cambios), se alcanza el objetivo elegido o pasan 90 s.
-4. El archivo se borra al instante y se mide el espacio ganado de verdad (`statfs`).
+iOS purga sus cachés cuando una app le pide espacio que no hay. Es el mismo mecanismo que el conocido truco de «alquilar una película más grande que el espacio libre», hecho de forma controlada:
 
-Opciones: cuánto liberar (1, 5, 10 o 20 GB, o todo lo posible). Si quieres que entre la caché de Fotos en iCloud, activa *Optimizar almacenamiento*.
+1. MaCleaner pide espacio con un archivo de relleno dentro de su propio contenedor (`F_PREALLOCATE`, que asigna bloques sin escribir datos; si no se admite, escribe ceros). Sigue pidiendo aunque no quepa: cada petición rechazada (`ENOSPC`) hace que iOS purgue para atenderla.
+2. Con el disco lleno, insiste cada 250 ms: lo que iOS libera se ocupa al momento, para que no baje la presión.
+3. Cuando iOS deja de liberar (25 s sin cambios), borra el relleno y repite. Como con el truco de la película, cada oleada suele liberar algo más. Para tras 4 oleadas, cuando una libera menos de 200 MB, al llegar al objetivo o a los 5 minutos.
+4. Mide el espacio ganado de verdad (`statfs`) con el relleno ya borrado.
 
-Salvaguardas: intenta dejar 300 MB libres; se detiene si la app pasa a segundo plano; borra cualquier archivo de relleno que haya quedado al abrir la app.
-
-#### Otras herramientas de iOS
-
-- **Caché de MaCleaner**: limpia `cachesDirectory` y los temporales de la propia app.
-- **Guía paso a paso**: desinstalar apps pesadas conservando sus datos (*Offload*).
+Salvaguardas: se detiene y borra el relleno si la app pasa a segundo plano; la pantalla no se bloquea mientras dura; al abrir la app se borra cualquier relleno que hubiera quedado. Durante la purga iOS puede avisar de que el almacenamiento está casi lleno: es normal.
 
 ### En todas las plataformas
 
@@ -200,7 +201,8 @@ Cleaner/
 │   │   ├── Privileges/           Acceso total al disco, instalación y cliente XPC
 │   │   ├── MacCleaningEngine.swift
 │   │   └── MaintenanceView.swift
-│   └── iOS/                      Motor de la Fototeca y consejos de espacio
+│   └── iOS/                      Purga de Datos del sistema, mantenimiento y consejos
+│                                 (Fototeca y carpetas, desactivadas)
 └── SharedXPC/                    Protocolo y validación compartidos con el asistente
 CleanerHelper/                    Demonio privilegiado (root) con lista blanca
 LaunchDaemons/                    launchd.plist del demonio (SMAppService)
@@ -216,7 +218,7 @@ Más detalle en [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 - **Ítems de inicio de sesión** (*Login Items* de `SMAppService`): no hay API pública para listar los de otras apps, así que se abren los Ajustes del Sistema.
 - **Instantáneas de Time Machine**: macOS decide cuánto libera; la cifra es un máximo.
 - **Apps del App Store** propiedad de root: pueden pedir la contraseña al moverse a la Papelera.
-- **iOS/iPadOS**: el sandbox impide ver datos de otras apps. La purga de espacio depende de lo que iOS decida liberar, y los archivos solo se analizan en las carpetas que elijas (ver arriba).
+- **iOS/iPadOS**: el sandbox impide ver datos de otras apps. La purga depende de lo que iOS decida liberar: justo después de otra purga o de reiniciar puede no liberar nada. Fototeca y carpetas están desactivadas en esta versión.
 - **No ejecutes la purga de espacio en el simulador**: el disco del simulador es el del Mac.
 
 ## Documentación

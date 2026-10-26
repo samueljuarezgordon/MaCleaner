@@ -83,9 +83,18 @@ Se leen los plist de `~/Library/LaunchAgents`, `/Library/LaunchAgents` y `/Libra
 
 ## iOS / iPadOS
 
-### Carpetas elegidas por el usuario
+### Basura del sistema
 
-Solo se analizan las carpetas concedidas en *Ajustes › Carpetas analizadas* (bookmarks de seguridad).
+| Categoría | Regla | Riesgo | Borrado |
+|---|---|---|---|
+| Datos del sistema purgables | `volumeAvailableCapacityForImportantUsage − volumeAvailableCapacity` (lo que iOS considera prescindible) | Seguro | iOS los purga al pedirle MaCleaner el espacio (`PurgeableSpaceReclaimer`) |
+| Caché de MaCleaner | Contenido de `cachesDirectory` y `tmp` de la propia app | Seguro | Definitivo |
+
+### Desactivadas en la 1.1.0
+
+Activables con `IOSCleaningEngine.includesPhotosAndFiles`. En dispositivos reales su análisis no terminaba.
+
+**Carpetas elegidas por el usuario** (*Ajustes › Carpetas analizadas*, con bookmarks de seguridad):
 
 | Categoría | Regla | Riesgo | Borrado |
 |---|---|---|---|
@@ -93,14 +102,15 @@ Solo se analizan las carpetas concedidas en *Ajustes › Carpetas analizadas* (b
 | Comprimidos e instaladores | `.zip`, `.rar`, `.7z`, `.ipa`, `.dmg`, `.pkg`, `.iso`, `.ipsw`… | Revisar si existe la carpeta descomprimida al lado; si no, Riesgo alto | «Eliminados recientemente» |
 | Archivos grandes | ≥ 100 MB y no está en iCloud | Riesgo alto | «Eliminados recientemente» |
 
-### Fototeca
+**Fototeca.** Nada se marca solo, ni al terminar el análisis ni con «Seleccionar lo seguro» desde la vista general: borrar de la Fototeca se sincroniza con iCloud y con los demás dispositivos.
 
-| Categoría | Riesgo |
-|---|---|
-| Fotos duplicadas | Seguro (se conserva la de mayor calidad) |
-| Vídeos grandes (≥ 200 MB) | Riesgo alto |
-| Capturas de pantalla | Seguro si tienen más de 90 días; si no, Revisar |
-| Grabaciones de pantalla | Revisar |
-| Fotos de ráfagas no elegidas | Seguro |
+| Categoría | Regla | Riesgo |
+|---|---|---|
+| Fotos duplicadas | Huella de Vision a distancia ≤ 0,1 y proporción parecida. Se conserva la copia más pesada | Revisar |
+| Vídeos duplicados | Misma duración (± 1 s), proporción y portada | Revisar |
+| Vídeos grandes | ≥ 200 MB | Riesgo alto |
+| Capturas de pantalla | `mediaSubtypes` | Revisar |
+| Grabaciones de pantalla | `mediaSubtypes` | Revisar |
+| Fotos de ráfagas no elegidas | Ni la representativa ni una elegida por el usuario | Revisar |
 
 Todo lo de la Fototeca va a «Eliminados recientemente» durante 30 días.

@@ -28,6 +28,12 @@ struct OverviewView: View {
                         subtitle: "\(viewModel.selectedStats.itemCount) elementos"
                     )
                     .padding(.top, 60)
+                    if viewModel.selectedItems().contains(where: { $0.removal == .systemPurge }) {
+                        Label("Purgando los datos del sistema por oleadas. Mantén MaCleaner abierta y en pantalla: puede tardar unos minutos y iOS quizá avise de que el almacenamiento está lleno.", systemImage: "internaldrive.fill")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                    }
                 case .done:
                     CleaningReportView(viewModel: viewModel)
                 }
@@ -103,7 +109,9 @@ private struct IdleHero: View {
             }
 
             #if os(iOS)
-            FolderAccessPrompt()
+            if IOSCleaningEngine.includesPhotosAndFiles {
+                FolderAccessPrompt()
+            }
             #endif
 
             ModuleGlossary(viewModel: viewModel)
@@ -258,7 +266,11 @@ private struct ScanningHero: View {
 
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: 12)], spacing: 12) {
                 ForEach(viewModel.scanScope) { category in
-                    CategoryProgressRow(category: category, status: viewModel.categoryStatus[category] ?? .pending)
+                    CategoryProgressRow(
+                        category: category,
+                        status: viewModel.categoryStatus[category] ?? .pending,
+                        fraction: viewModel.categoryFraction[category]
+                    )
                 }
             }
         }
@@ -268,6 +280,7 @@ private struct ScanningHero: View {
 private struct CategoryProgressRow: View {
     let category: CleaningCategory
     let status: CleanerViewModel.CategoryStatus
+    var fraction: Double?
 
     var body: some View {
         HStack(spacing: 10) {
@@ -281,6 +294,12 @@ private struct CategoryProgressRow: View {
                 Image(systemName: "circle.dotted")
                     .foregroundStyle(.tertiary)
             case .scanning:
+                if let fraction {
+                    Text(fraction, format: .percent.precision(.fractionLength(0)))
+                        .font(.caption.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                }
                 ProgressView()
                     .controlSize(.small)
             case .done(let bytes):
@@ -489,6 +508,31 @@ private struct ModuleCard: View {
 
 // MARK: - Después de limpiar
 
+#if os(iOS)
+/// Tras borrar fotos: el espacio solo se libera al vaciar «Eliminados recientemente».
+private struct RecentlyDeletedHint: View {
+    let count: Int
+    @Environment(\.openURL) private var openURL
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("\(count) fotos y vídeos en «Eliminados recientemente»", systemImage: "trash")
+                .font(.headline)
+            Text("Puedes recuperarlos durante 30 días. Para liberar ya el espacio, vacía esa carpeta: Fotos › Colecciones › Eliminados recientemente › Seleccionar › Eliminar todo. Después ya no se podrán recuperar.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+            Button("Abrir Fotos", systemImage: "photo.on.rectangle") {
+                if let url = URL(string: "photos-redirect://") { openURL(url) }
+            }
+            .buttonStyle(.glass)
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(in: .rect(cornerRadius: 16))
+    }
+}
+#endif
+
 private struct CleaningReportView: View {
     let viewModel: CleanerViewModel
 
@@ -507,15 +551,27 @@ private struct CleaningReportView: View {
                     Text("Liberados \(report.reclaimedBytes.byteString)")
                         .font(.title2.monospacedDigit())
                     if report.trashedBytes > 0 {
+                        #if os(macOS)
                         Text("\(report.trashedBytes.byteString) se movieron a la Papelera. El espacio se liberará cuando la vacíes.")
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
+                        #else
+                        Text("\(report.trashedBytes.byteString) se movieron a «Eliminados recientemente». El espacio se liberará cuando lo vacíes.")
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                        #endif
                     }
                     if report.disabledStartupItems > 0 {
                         Label("\(report.disabledStartupItems) procesos de inicio desactivados", systemImage: "bolt.slash.fill")
                             .foregroundStyle(.secondary)
                     }
                 }
+
+                #if os(iOS)
+                if report.photosMovedToRecentlyDeleted > 0 {
+                    RecentlyDeletedHint(count: report.photosMovedToRecentlyDeleted)
+                }
+                #endif
 
                 if !report.failures.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {

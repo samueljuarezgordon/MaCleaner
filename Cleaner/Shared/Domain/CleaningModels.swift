@@ -63,6 +63,8 @@ nonisolated enum RemovalMethod: Sendable, Hashable {
     case systemLaunchItem(label: String)
     /// Borra la copia local de un archivo de iCloud Drive; el archivo sigue en iCloud.
     case evictFromDevice
+    /// Se pide a iOS que purgue sus cachés llenando el espacio libre (iOS).
+    case systemPurge
 
     /// Qué hace la app con el elemento, en lenguaje llano.
     var summary: LocalizedStringResource {
@@ -70,20 +72,27 @@ nonisolated enum RemovalMethod: Sendable, Hashable {
         case .delete: "Se borra definitivamente."
         case .moveToTrash: "Va a la Papelera. Podrás recuperarlo hasta que la vacíes."
         case .privileged: "Se borra definitivamente con el asistente privilegiado."
-        case .photoLibrary: "Va a «Eliminados recientemente» durante 30 días."
+        case .photoLibrary: "Va a «Eliminados recientemente» durante 30 días. Con Fotos en iCloud, se borra también de iCloud y de tus otros dispositivos."
         case .simulatorDevice: "Xcode elimina el simulador con simctl."
         case .simulatorRuntime: "Xcode elimina el runtime con simctl."
         case .uninstallApp: "La app y sus datos van a la Papelera. Podrás recuperarlos hasta que la vacíes."
         case .launchAgent: "Se detiene ahora y su archivo de configuración va a la Papelera: no volverá a arrancar."
         case .systemLaunchItem: "Se detiene y se borra su archivo de configuración con el asistente privilegiado."
         case .evictFromDevice: "Se borra solo la copia de este dispositivo. El archivo sigue en iCloud Drive y se vuelve a descargar al abrirlo."
+        case .systemPurge: "iOS purga él mismo estas cachés cuando MaCleaner le pide el espacio. Mantén la app abierta unos minutos."
         }
+    }
+
+    /// `true` si nunca se marca solo (por defecto o con «Seleccionar lo seguro» de toda la app):
+    /// borrar de la Fototeca se sincroniza con iCloud, así que lo elige siempre el usuario.
+    var needsExplicitChoice: Bool {
+        self == .photoLibrary
     }
 
     var isRecoverable: Bool {
         switch self {
         case .moveToTrash, .photoLibrary, .uninstallApp, .launchAgent, .evictFromDevice: true
-        case .delete, .privileged, .simulatorDevice, .simulatorRuntime, .systemLaunchItem: false
+        case .delete, .privileged, .simulatorDevice, .simulatorRuntime, .systemLaunchItem, .systemPurge: false
         }
     }
 }
@@ -98,6 +107,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
     case userLogs
     case systemLogs
     case ownAppCache
+    case systemData
     // Desarrollo
     case xcodeDerivedData
     case xcodeDeviceSupport
@@ -130,6 +140,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
     case iCloudDriveDownloads
     // iOS / iPadOS
     case duplicatePhotos
+    case duplicateVideos
     case largeVideos
     case screenshots
     case screenRecordings
@@ -145,6 +156,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .userLogs: "Registros de usuario"
         case .systemLogs: "Registros del sistema"
         case .ownAppCache: "Caché de MaCleaner"
+        case .systemData: "Datos del sistema purgables"
         case .xcodeDerivedData: "DerivedData de Xcode"
         case .xcodeDeviceSupport: "Soporte de dispositivos"
         case .xcodeArchives: "Archivos de Xcode"
@@ -167,6 +179,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .trash: "Papelera"
         case .iCloudDriveDownloads: "Copias locales de iCloud Drive"
         case .duplicatePhotos: "Fotos duplicadas"
+        case .duplicateVideos: "Vídeos duplicados"
         case .largeVideos: "Vídeos grandes"
         case .screenshots: "Capturas de pantalla"
         case .screenRecordings: "Grabaciones de pantalla"
@@ -187,6 +200,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
             "Registros de actividad y de fallos. Solo sirven para diagnosticar problemas antiguos."
         case .ownAppCache:
             "Archivos temporales y cachés que la propia MaCleaner ha creado (miniaturas, restos de análisis)."
+        case .systemData:
+            "La parte de «Datos del sistema» que iOS marca como prescindible: cachés de otras apps y de Safari, temporales, música y vídeo en streaming, restos de actualizaciones y, con «Optimizar almacenamiento», originales de Fotos que ya están en iCloud."
         case .xcodeDerivedData:
             "Productos intermedios de compilación de Xcode. La siguiente compilación tardará algo más."
         case .xcodeDeviceSupport:
@@ -230,7 +245,9 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .iCloudDriveDownloads:
             "Archivos de iCloud Drive descargados en este dispositivo. El original está en iCloud: puedes liberar la copia local sin perder nada."
         case .duplicatePhotos:
-            "Fotos visualmente idénticas. Se conserva la copia de mayor calidad."
+            "Fotos visualmente idénticas, aunque estén recomprimidas o reescaladas (por ejemplo, guardadas desde WhatsApp). Se propone borrar las copias y conservar la de mayor calidad."
+        case .duplicateVideos:
+            "Vídeos con la misma duración, proporción e imagen, aunque estén recomprimidos (por ejemplo, reenviados por mensajería). Se propone borrar las copias y conservar la de mayor calidad."
         case .largeVideos:
             "Vídeos de más de 200 MB."
         case .screenshots:
@@ -249,6 +266,8 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
             "Las apps pueden ir algo más lentas la primera vez que las abras mientras reconstruyen su caché."
         case .ownAppCache:
             "Ninguna: MaCleaner los vuelve a crear si los necesita."
+        case .systemData:
+            "No se borra ninguna foto ni documento. Las apps tardan algo más la primera vez que las abras mientras reconstruyen su caché. Durante la purga el almacenamiento se llena unos minutos y iOS puede avisar de ello: es normal."
         case .userLogs, .systemLogs:
             "Ninguna. Solo perderás el historial para diagnosticar fallos pasados."
         case .xcodeDerivedData:
@@ -288,13 +307,15 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .iCloudDriveDownloads:
             "Ninguna pérdida: el archivo sigue en iCloud Drive y en tus otros dispositivos. Se volverá a descargar (necesitas conexión) la próxima vez que lo abras."
         case .duplicatePhotos:
-            "Ninguna: se conserva la mejor copia de cada foto."
+            "Se conserva la mejor copia de cada foto. Con Fotos en iCloud, las copias se borran también de tus otros dispositivos."
+        case .duplicateVideos:
+            "Se conserva la mejor copia de cada vídeo. Con Fotos en iCloud, las copias se borran también de tus otros dispositivos."
         case .largeVideos, .screenRecordings:
-            "Si no tienes otra copia, perderás el vídeo pasados 30 días."
+            "Si no tienes otra copia, perderás el vídeo pasados 30 días. Con Fotos en iCloud, se borra también de tus otros dispositivos."
         case .screenshots:
-            "Desaparecen de tu fototeca y se borran del todo pasados 30 días."
+            "Desaparecen de tu fototeca, también en tus otros dispositivos con Fotos en iCloud, y se borran del todo pasados 30 días."
         case .burstPhotos:
-            "La foto principal de cada ráfaga se conserva; solo se van las descartadas."
+            "La foto principal de cada ráfaga se conserva; solo se van las descartadas, también de tus otros dispositivos con Fotos en iCloud."
         }
     }
 
@@ -304,6 +325,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .appCaches: "app.badge.fill"
         case .userLogs, .systemLogs: "doc.text.fill"
         case .ownAppCache: "sparkles"
+        case .systemData: "internaldrive.fill"
         case .xcodeDerivedData: "hammer.fill"
         case .xcodeDeviceSupport: "iphone.gen3"
         case .xcodeArchives: "shippingbox.fill"
@@ -326,6 +348,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .trash: "trash.fill"
         case .iCloudDriveDownloads: "icloud.and.arrow.down.fill"
         case .duplicatePhotos: "photo.on.rectangle.angled"
+        case .duplicateVideos: "film.stack"
         case .largeVideos: "video.fill"
         case .screenshots: "camera.viewfinder"
         case .screenRecordings: "record.circle"
@@ -343,7 +366,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
 
     var module: CleaningModule {
         switch self {
-        case .userCaches, .appCaches, .systemCaches, .userLogs, .systemLogs, .mailAttachments, .ownAppCache: .systemJunk
+        case .userCaches, .appCaches, .systemCaches, .userLogs, .systemLogs, .mailAttachments, .ownAppCache, .systemData: .systemJunk
         case .xcodeDerivedData, .xcodeDeviceSupport, .xcodeArchives, .xcodeCaches, .simulatorDevices,
              .simulatorRuntimes, .simulatorCaches, .packageCaches, .projectDependencies: .developer
         case .installers, .compressedArchives: .downloads
@@ -353,7 +376,7 @@ nonisolated enum CleaningCategory: String, Sendable, CaseIterable, Identifiable 
         case .largeFiles, .deviceBackups: .largeFiles
         case .trash: .trash
         case .iCloudDriveDownloads: .iCloudDrive
-        case .duplicatePhotos, .largeVideos, .screenshots, .screenRecordings, .burstPhotos: .photos
+        case .duplicatePhotos, .duplicateVideos, .largeVideos, .screenshots, .screenRecordings, .burstPhotos: .photos
         }
     }
 }
@@ -471,12 +494,16 @@ nonisolated struct CleaningReport: Sendable {
     let failures: [String]
     /// Elementos de inicio que se desactivaron.
     var disabledStartupItems = 0
+    /// Fotos y vídeos enviados a «Eliminados recientemente» (iOS).
+    var photosMovedToRecentlyDeleted = 0
 }
 
 nonisolated enum ScanProgress: Sendable {
     case started(CleaningCategory)
     case finished(CleaningCategory, bytes: Int64)
     case metrics(entriesVisited: Int, bytes: Int64)
+    /// Avance de una categoría lenta (por ejemplo, comparar miles de fotos): `done` de `total`.
+    case fraction(CleaningCategory, done: Int, total: Int)
 }
 
 /// Contrato común de los motores de limpieza de cada plataforma.

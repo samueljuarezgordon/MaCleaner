@@ -1,4 +1,7 @@
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 /// Pantallas de la barra lateral.
 enum SidebarDestination: Hashable {
@@ -59,6 +62,20 @@ struct ContentView: View {
         }
         .sheet(isPresented: $viewModel.isReviewingClean) {
             CleanReviewSheet(viewModel: viewModel)
+        }
+        .onChange(of: viewModel.phase) { _, phase in
+            // Al limpiar se vuelve a la pantalla principal, donde se ve el progreso.
+            if phase == .cleaning { destination = .overview }
+            #if os(iOS)
+            // Si la pantalla se bloquea, iOS suspende la app y el análisis se queda parado.
+            UIApplication.shared.isIdleTimerDisabled = phase == .scanning || phase == .cleaning
+            #endif
+        }
+        .sensoryFeedback(trigger: viewModel.phase) { old, new in
+            switch (old, new) {
+            case (.scanning, .results), (.cleaning, .done): .success
+            default: nil
+            }
         }
         .alert(
             "No se pudo completar la operación",

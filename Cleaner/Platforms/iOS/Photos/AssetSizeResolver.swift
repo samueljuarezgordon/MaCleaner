@@ -47,12 +47,14 @@ nonisolated enum AssetSizeResolver {
         )
     }
 
-    /// Resuelve los tamaños en paralelo con una ventana deslizante de tareas.
+    /// Resuelve los tamaños en paralelo con una ventana deslizante de tareas. `onProgress`
+    /// recibe cuántos van resueltos, cada cierto número para no saturar la interfaz.
     @concurrent
     static func infos(
         for references: [AssetReference],
         metrics: ScanMetrics,
-        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount
+        maxConcurrency: Int = ProcessInfo.processInfo.activeProcessorCount,
+        onProgress: @escaping @Sendable (Int) -> Void = { _ in }
     ) async -> [String: AssetInfo] {
         await withTaskGroup(of: AssetInfo.self) { group in
             var pending = references.makeIterator()
@@ -66,6 +68,7 @@ nonisolated enum AssetSizeResolver {
             while let info = await group.next() {
                 result[info.localIdentifier] = info
                 metrics.record(entries: 1, allocated: info.allocatedBytes, reclaimable: 0)
+                if result.count.isMultiple(of: 100) { onProgress(result.count) }
                 if !Task.isCancelled, let reference = pending.next() {
                     group.addTask { Self.info(for: reference) }
                 }

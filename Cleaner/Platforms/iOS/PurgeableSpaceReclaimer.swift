@@ -1,56 +1,89 @@
 #if os(iOS)
 import Darwin
 import Foundation
+import Synchronization
+import UIKit
 
 /// Pide a iOS que vacíe el espacio purgable («Datos del sistema»).
 ///
 /// iOS no permite a ninguna app borrar cachés de otras apps ni del sistema. Lo que sí hace
-/// el propio iOS es purgarlas cuando el almacenamiento se llena: cachés de apps, archivos
-/// temporales, cachés de streaming y, con «Optimizar almacenamiento» activado, los
-/// originales de Fotos en iCloud que ya están en la nube.
+/// el propio iOS es purgarlas cuando una app pide espacio que no hay: cachés de apps,
+/// archivos temporales, cachés de streaming, restos de actualizaciones y, con «Optimizar
+/// almacenamiento» activado, los originales de Fotos que ya están en iCloud.
 ///
-/// Técnica del «archivo de relleno»: se ocupa el espacio libre por tramos dentro del propio
-/// contenedor de la app hasta que el disco se llena (`ENOSPC`). Ese es justo el estado que
-/// hace que iOS purgue. Cuando iOS libera espacio, se ocupa también, hasta que deja de
-/// liberar. Al terminar, el archivo se borra de inmediato.
+/// Es el mismo mecanismo que el conocido truco de «alquilar una película más grande que el
+/// espacio libre», hecho de forma controlada y por oleadas:
+/// 1. Se llena el espacio libre con un archivo de relleno hasta que iOS rechaza la escritura
+///    (`ENOSPC`). Cada petición rechazada hace que iOS purgue para atenderla.
+/// 2. Con el disco lleno se sigue pidiendo espacio cada poco: lo que iOS libera se ocupa al
+///    momento, así la presión no baja y iOS pasa a purgar con más urgencia.
+/// 3. Cuando iOS deja de liberar, se borra el relleno y se repite. Igual que con el truco de
+///    la película, cada intento suele liberar algo más, hasta que deja de dar fruto.
+///
+/// El archivo de relleno se borra siempre: al terminar, al cancelar, si la app pasa a
+/// segundo plano y, si la app se cerrase a la fuerza, en el siguiente arranque.
 nonisolated enum PurgeableSpaceReclaimer {
     struct Progress: Sendable {
+        /// Oleada en curso (empieza en 1).
+        let wave: Int
         /// Bytes ocupados por el archivo de relleno.
         let reservedBytes: Int64
         /// Espacio libre que queda.
         let availableBytes: Int64
-        /// Bytes que iOS ha liberado hasta ahora (aproximado).
+        /// Bytes que iOS ha liberado en total hasta ahora (aproximado).
         let purgedBytes: Int64
-        /// `true` en cuanto el disco se ha llenado (iOS ya debería estar purgando).
+        /// `true` en cuanto el disco se ha llenado en esta oleada (iOS ya debería estar purgando).
         let reachedFull: Bool
+    }
+
+    struct Outcome: Sendable {
+        /// Espacio libre ganado de verdad, medido con el relleno ya borrado.
+        let freedBytes: Int64
+        let waves: Int
+        /// `false` si se detuvo antes de tiempo (cancelación o la app pasó a segundo plano).
+        let completed: Bool
     }
 
     enum ReclaimError: LocalizedError {
         case cannotCreateFile(Int32)
-        case nothingToFill
 
         var errorDescription: String? {
             switch self {
             case .cannotCreateFile(let code):
                 "No se pudo crear el archivo temporal (\(String(cString: strerror(code))))."
-            case .nothingToFill:
-                "El almacenamiento ya está prácticamente lleno: iOS debería estar purgando por su cuenta. Prueba de nuevo dentro de unos minutos."
             }
         }
     }
 
-    /// Espacio que se intenta dejar libre para que el sistema siga respondiendo.
-    static let safetyFloor: Int64 = 300 * 1024 * 1024
-    /// Tamaño de cada tramo. Tramos pequeños: si iOS rechaza uno, el siguiente sigue intentándolo.
-    static let chunk: Int64 = 256 * 1024 * 1024
-    /// Tramo mínimo; por debajo de esto el disco se considera lleno.
-    static let minimumChunk: Int64 = 16 * 1024 * 1024
-    static let timeout: Duration = .seconds(90)
-    /// Tras llenar el disco, si iOS no libera nada durante este tiempo, se da por terminado.
-    static let stallTimeout: Duration = .seconds(12)
+    /// Tamaño máximo de cada petición de espacio.
+    static let chunk: Int64 = 512 * 1024 * 1024
+    /// Petición mínima; si ni esto cabe, el disco está lleno del todo.
+    static let minimumChunk: Int64 = 4 * 1024 * 1024
+    /// Oleadas como máximo. Cada una vuelve a apretar a iOS desde cero.
+    static let maximumWaves = 4
+    /// Una oleada que libera menos que esto indica que a iOS ya no le queda nada que purgar.
+    static let worthwhileWave: Int64 = 200 * 1024 * 1024
+    /// Tras llenar el disco, si iOS no libera nada durante este tiempo, la oleada termina.
+    /// `deleted` tarda en reaccionar: con menos de ~20 s se cortaba antes de que empezase.
+    static let stallTimeout: Duration = .seconds(25)
+    /// Duración máxima de una oleada y de toda la purga.
+    static let waveTimeout: Duration = .seconds(120)
+    static let totalTimeout: Duration = .seconds(300)
 
     static var reservationURL: URL {
         FileManager.default.temporaryDirectory.appending(path: "MaCleaner-reserva-espacio.tmp")
+    }
+
+    /// Se activa al pasar la app a segundo plano: nunca se deja el disco lleno sin vigilancia.
+    private static let abortFlag = Mutex(false)
+
+    /// Detiene la purga en curso y borra el relleno al instante. Seguro de llamar siempre.
+    static func abortIfRunning() {
+        abortFlag.withLock { $0 = true }
+    }
+
+    private static var shouldStop: Bool {
+        Task.isCancelled || abortFlag.withLock { $0 }
     }
 
     /// Borra un archivo de relleno que haya quedado si la app se cerró a mitad del proceso.
@@ -59,10 +92,52 @@ nonisolated enum PurgeableSpaceReclaimer {
     }
 
     /// Ejecuta la purga hasta liberar `target` bytes (o todo lo posible si es `nil`).
-    /// El archivo de relleno se borra siempre: al terminar, al cancelarse o si falla.
     @concurrent
-    static func run(target: Int64?, onProgress: @escaping @Sendable (Progress) -> Void) async throws {
+    @discardableResult
+    static func run(target: Int64?, onProgress: @escaping @Sendable (Progress) -> Void = { _ in }) async throws -> Outcome {
+        abortFlag.withLock { $0 = false }
         removeLeftoverReservation()
+        // Que la pantalla no se bloquee: al bloquearse, la app pasa a segundo plano y se detiene.
+        await MainActor.run { UIApplication.shared.isIdleTimerDisabled = true }
+
+        let initialAvailable = available()
+        let clock = ContinuousClock()
+        let deadline = clock.now + totalTimeout
+        var wave = 0
+        var completed = true
+
+        do {
+            while wave < maximumWaves {
+                if shouldStop { completed = false; break }
+                wave += 1
+                let before = available()
+                try await runWave(number: wave, deadline: deadline, initialAvailable: initialAvailable, target: target, onProgress: onProgress)
+                // El relleno ya está borrado: se deja que iOS contabilice lo liberado.
+                try? await Task.sleep(for: .seconds(2))
+                let gained = available() - before
+                let total = available() - initialAvailable
+
+                if let target, total >= target { break }
+                if gained < worthwhileWave || clock.now >= deadline { break }
+            }
+        } catch {
+            await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+            throw error
+        }
+
+        await MainActor.run { UIApplication.shared.isIdleTimerDisabled = false }
+        if shouldStop { completed = false }
+        return Outcome(freedBytes: max(0, available() - initialAvailable), waves: wave, completed: completed)
+    }
+
+    /// Una oleada: llena el disco, mantiene la presión mientras iOS purgue y borra el relleno.
+    private static func runWave(
+        number: Int,
+        deadline: ContinuousClock.Instant,
+        initialAvailable: Int64,
+        target: Int64?,
+        onProgress: @Sendable (Progress) -> Void
+    ) async throws {
         let path = reservationURL.path
         let descriptor = open(path, O_RDWR | O_CREAT | O_TRUNC | O_CLOEXEC, 0o600)
         guard descriptor >= 0 else { throw ReclaimError.cannotCreateFile(errno) }
@@ -73,35 +148,34 @@ nonisolated enum PurgeableSpaceReclaimer {
 
         var filler = Filler(descriptor: descriptor)
         let clock = ContinuousClock()
-        let deadline = clock.now + timeout
+        let waveDeadline = min(deadline, clock.now + waveTimeout)
         var lastGrowth = clock.now
         var reachedFull = false
-        let initialAvailable = available()
-        guard initialAvailable - safetyFloor >= minimumChunk else { throw ReclaimError.nothingToFill }
+        // Tamaño de la siguiente petición: se reduce a la mitad con cada rechazo para absorber
+        // hasta el último hueco, y vuelve al máximo en cuanto iOS libera algo.
+        var request = chunk
 
-        while clock.now < deadline, !Task.isCancelled {
-            let room = available() - safetyFloor
-            if room >= minimumChunk {
-                switch filler.grow(by: min(chunk, room)) {
-                case .grew:
-                    lastGrowth = clock.now
-                case .full:
-                    // El disco se ha llenado: es justo lo que hace que iOS purgue.
-                    reachedFull = true
-                }
-            } else {
+        while clock.now < waveDeadline, !shouldStop {
+            // Se pide al menos un tramo aunque `statfs` diga que no cabe: la petición rechazada
+            // es justo lo que hace que iOS purgue.
+            let room = available()
+            switch filler.grow(by: max(request, min(chunk, room))) {
+            case .grew:
+                lastGrowth = clock.now
+                request = chunk
+            case .full:
                 reachedFull = true
+                request = max(minimumChunk, request / 2)
             }
 
-            let now = available()
-            let purged = max(0, filler.size + now - initialAvailable)
-            onProgress(Progress(reservedBytes: filler.size, availableBytes: now, purgedBytes: purged, reachedFull: reachedFull))
+            let purged = max(0, filler.size + available() - initialAvailable)
+            onProgress(Progress(wave: number, reservedBytes: filler.size, availableBytes: available(), purgedBytes: purged, reachedFull: reachedFull))
 
             // Al llegar al objetivo se para: así el almacenamiento está lleno el menor tiempo posible.
             if let target, purged >= target { break }
             if reachedFull, clock.now - lastGrowth > stallTimeout { break }
-            // Mientras haya espacio se llena deprisa; con el disco lleno se espera a iOS.
-            try? await Task.sleep(for: reachedFull ? .milliseconds(500) : .milliseconds(50))
+            // Mientras haya espacio se llena deprisa; con el disco lleno se insiste cada poco.
+            try? await Task.sleep(for: reachedFull ? .milliseconds(250) : .milliseconds(20))
         }
     }
 
@@ -128,6 +202,7 @@ nonisolated enum PurgeableSpaceReclaimer {
 
         mutating func grow(by bytes: Int64) -> Outcome {
             if !usesWrites {
+                // Todo o nada: una petición que no cabe entera se rechaza y obliga a purgar.
                 var store = fstore_t(
                     fst_flags: UInt32(F_ALLOCATEALL),
                     fst_posmode: F_PEOFPOSMODE,
@@ -150,13 +225,15 @@ nonisolated enum PurgeableSpaceReclaimer {
 
         private mutating func writeZeros(_ bytes: Int64) -> Outcome {
             var remaining = bytes
+            var wroteAnything = false
             while remaining > 0 {
                 let count = Int(min(remaining, Int64(Self.zeros.count)))
                 let written = Self.zeros.withUnsafeBytes { buffer in
                     pwrite(descriptor, buffer.baseAddress, count, off_t(size))
                 }
                 // Cualquier fallo de escritura (normalmente ENOSPC) significa que ya no cabe más.
-                if written <= 0 { return .full }
+                if written <= 0 { return wroteAnything ? .grew : .full }
+                wroteAnything = true
                 size += Int64(written)
                 remaining -= Int64(written)
             }

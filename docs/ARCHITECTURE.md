@@ -20,10 +20,11 @@ MaCleaner es una app SwiftUI multiplataforma (macOS, iPadOS, iOS) con un único 
 └───────┬──────────────────────────────────────────┬──────────┘
         │ macOS                                     │ iOS / iPadOS
 ┌───────▼───────────────────────┐   ┌───────────────▼──────────┐
-│ MacCleaningEngine             │   │ PhotoLibraryEngine       │
-│  ├ MacScanContext             │   │  ├ AssetSizeResolver     │
-│  ├ MacScanCollectors (+Deep,  │   │  └ VisualDuplicateDetector│
-│  │   +System)                 │   └──────────────────────────┘
+│ MacCleaningEngine             │   │ IOSCleaningEngine        │
+│  ├ MacScanContext             │   │  ├ SystemDataScanner     │
+│  ├ MacScanCollectors (+Deep,  │   │  ├ PurgeableSpaceReclaimer│
+│  │   +System)                 │   │  └ OwnCacheScanner       │
+│                               │   └──────────────────────────┘
 │  ├ BulkDirectoryScanner       │
 │  ├ SimulatorInventory/Cleaner │
 │  └ HelperClient ──XPC──► CleanerHelper (root)
@@ -73,19 +74,26 @@ Recolectores:
 
 ## Escaneo en iOS
 
-`IOSCleaningEngine` combina dos motores. Si falta el permiso de uno (Fotos o carpetas), el otro sigue funcionando y sus categorías se marcan como inaccesibles.
+`IOSCleaningEngine` ofrece dos categorías:
 
-- `FilesEngine` recorre con `FileManager.enumerator` las carpetas guardadas en `FolderAccessStore`, activando el permiso de seguridad de cada una. Para limpiar, activa el permiso de todas mientras borra.
-- `PhotoLibraryEngine` se describe a continuación.
+- **Datos del sistema purgables** (`SystemDataScanner`): un único elemento con lo que iOS dice que es purgable, `volumeAvailableCapacityForImportantUsage − volumeAvailableCapacity`. Su método de borrado, `.systemPurge`, ejecuta `PurgeableSpaceReclaimer` al final de la limpieza.
+- **Caché de MaCleaner** (`OwnCacheScanner`): `cachesDirectory` y `tmp` de la propia app.
 
-`PurgeableSpaceReclaimer` no es una categoría sino una acción de mantenimiento (ver el README). Reserva espacio con `fcntl(F_PREALLOCATE)` en el directorio temporal de la app, sondea `volumeAvailableCapacity` cada 0,5 s y libera la reserva siempre (`defer`), también al cancelarse.
+`PurgeableSpaceReclaimer` hace que iOS purgue pidiéndole espacio que no hay:
 
-`PhotoLibraryEngine` pide acceso de lectura y escritura a la Fototeca, calcula el tamaño real de cada asset (todos sus recursos) y:
+- Hace crecer un archivo de relleno en `tmp` con `fcntl(F_PREALLOCATE)`, o escribiendo ceros si no se admite. Pide tramos de hasta 512 MB aunque `statfs` diga que no caben: cada `ENOSPC` es una petición de purga. Con cada rechazo, el tramo se reduce a la mitad, hasta 4 MB.
+- Trabaja por oleadas, de 4 como máximo. Cada una termina tras 25 s sin que iOS libere nada y borra el relleno (`defer`).
+- Se detiene al cancelarse o con `abortIfRunning()`, que `MaCleanerApp` llama al pasar a segundo plano. Mientras dura, desactiva el bloqueo de pantalla.
 
-1. Agrupa duplicados con `VNGenerateImageFeaturePrintRequest` + *union-find*, y conserva la copia más pesada.
-2. Filtra vídeos de más de 200 MB.
-3. Usa `mediaSubtypes` para capturas y grabaciones de pantalla.
-4. Busca con `includeAllBurstAssets` las fotos de ráfagas que no son la representativa ni una elegida por el usuario.
+La misma purga está en *Mantenimiento y consejos* (`StorageTipsView`), con un objetivo de bytes.
+
+### Desactivado: Fototeca y carpetas
+
+Con `IOSCleaningEngine.includesPhotosAndFiles = false`, estos motores no se usan, aunque siguen compilándose:
+
+- `FilesEngine` recorre en paralelo las subcarpetas de las carpetas de `FolderAccessStore`.
+- `PhotoLibraryEngine` busca vídeos grandes, capturas, grabaciones y ráfagas. Para los duplicados usa `VisualDuplicateDetector`: huellas de Vision normalizadas, agrupadas por proporción (fotos) o duración (vídeos) y comparadas por bloques con `vDSP_mmul`.
+- `FeaturePrintCache` guarda las huellas entre análisis, y `BackgroundScanSession` (`BGContinuedProcessingTask`) permite que el análisis siga en segundo plano con una Live Activity.
 
 ## Estado de presentación
 

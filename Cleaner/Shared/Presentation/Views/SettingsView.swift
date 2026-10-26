@@ -9,7 +9,9 @@ struct SettingsView: View {
     var body: some View {
         Form {
             #if os(iOS)
-            FolderAccessSection()
+            if IOSCleaningEngine.includesPhotosAndFiles {
+                FolderAccessSection()
+            }
             #endif
 
             Section {
@@ -55,7 +57,11 @@ struct SettingsView: View {
             } header: {
                 Text("Al terminar el análisis")
             } footer: {
+                #if os(iOS)
+                Text("Lo de riesgo alto nunca se selecciona automáticamente. Las fotos y vídeos tampoco: los eliges siempre tú.")
+                #else
                 Text("Lo de riesgo alto nunca se selecciona automáticamente.")
+                #endif
             }
 
             Section {

@@ -161,7 +161,7 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
                     } else {
                         failures.append("\(item.displayName): \(result.message)")
                     }
-                case .privileged, .photoLibrary, .evictFromDevice:
+                case .privileged, .photoLibrary, .evictFromDevice, .systemPurge:
                     continue
                 }
             } catch {

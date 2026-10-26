@@ -1,5 +1,6 @@
 #if os(iOS)
 import Foundation
+import os
 
 /// Analiza las carpetas concedidas por el usuario: copias locales de iCloud Drive que se
 /// pueden liberar, archivos grandes y comprimidos o instaladores.
@@ -15,10 +16,16 @@ nonisolated struct FilesEngine: Sendable {
         "zip", "rar", "7z", "tar", "gz", "tgz", "bz2", "xz", "ipa", "dmg", "pkg", "iso", "ipsw",
     ]
 
-    private static let keys: [URLResourceKey] = [
+    fileprivate static let keys: [URLResourceKey] = [
         .isRegularFileKey, .totalFileAllocatedSizeKey, .fileAllocatedSizeKey, .totalFileSizeKey, .fileSizeKey,
         .isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey, .contentModificationDateKey,
     ]
+
+    /// Subcarpetas que se recorren a la vez. En iCloud Drive cada consulta de atributos pasa por
+    /// el proveedor de archivos del sistema; en serie, con miles de archivos, no acababa nunca.
+    private static let maxConcurrentFolders = 8
+
+    private static let logger = Logger(subsystem: "MaCleaner", category: "Archivos")
 
     /// `nil` si el usuario no ha concedido ninguna carpeta.
     @concurrent
@@ -35,11 +42,18 @@ nonisolated struct FilesEngine: Sendable {
         var items: [ScanItem] = []
         for folder in folders {
             try Task.checkCancellation()
-            items += try FolderAccessStore.withAccess(to: folder) {
-                try Self.scan(folder: folder, metrics: metrics)
-            }
+            let clock = ContinuousClock()
+            let start = clock.now
+            let before = metrics.snapshot.entriesVisited
+            let didStart = folder.startAccessingSecurityScopedResource()
+            defer { if didStart { folder.stopAccessingSecurityScopedResource() } }
+
+            items += try await Self.scan(folder: folder, metrics: metrics, progress: progress)
+
+            let visited = metrics.snapshot.entriesVisited - before
+            Self.logger.info("\(folder.lastPathComponent, privacy: .public): \(visited) elementos en \((clock.now - start).formatted(), privacy: .public)")
             let snapshot = metrics.snapshot
-            progress.yield(.metrics(entriesVisited: snapshot.entriesVisited, bytes: items.reduce(0) { $0 + $1.reclaimableBytes }))
+            progress.yield(.metrics(entriesVisited: snapshot.entriesVisited, bytes: snapshot.allocatedBytes))
         }
 
         items = items.filter { categories.contains($0.category) }
@@ -49,27 +63,91 @@ nonisolated struct FilesEngine: Sendable {
         return items
     }
 
-    private static func scan(folder: URL, metrics: ScanMetrics) throws -> [ScanItem] {
-        guard let enumerator = FileManager.default.enumerator(
+    /// Recorre `folder`: sus archivos directos aquí y cada subcarpeta en paralelo.
+    private static func scan(folder: URL, metrics: ScanMetrics, progress: AsyncStream<ScanProgress>.Continuation) async throws -> [ScanItem] {
+        let children = (try? FileManager.default.contentsOfDirectory(
             at: folder,
-            includingPropertiesForKeys: keys,
-            options: [.skipsHiddenFiles, .skipsPackageDescendants]
-        ) else { return [] }
+            includingPropertiesForKeys: keys + [.isDirectoryKey, .isPackageKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
 
-        // Nombres de carpetas por directorio, para saber si un comprimido ya está descomprimido.
-        var folderNames: [String: Set<String>] = [:]
+        var topLevel = Listing()
+        var subfolders: [URL] = []
+        for child in children {
+            let kind = try? child.resourceValues(forKeys: [.isDirectoryKey, .isPackageKey])
+            if kind?.isDirectory == true, kind?.isPackage != true {
+                subfolders.append(child)
+                topLevel.folderNames[folder.path, default: []].insert(child.lastPathComponent.lowercased())
+            } else {
+                topLevel.add(child)
+            }
+            metrics.record(entries: 1, allocated: 0, reclaimable: 0)
+        }
+        var items = classify(topLevel, folder: folder, metrics: metrics)
+
+        items += try await withThrowingTaskGroup(of: [ScanItem].self) { group in
+            var pending = subfolders.makeIterator()
+            for _ in 0..<maxConcurrentFolders {
+                guard let subfolder = pending.next() else { break }
+                group.addTask { try Self.scanTree(subfolder, folder: folder, metrics: metrics, progress: progress) }
+            }
+            var found: [ScanItem] = []
+            while let result = try await group.next() {
+                found += result
+                if let subfolder = pending.next() {
+                    group.addTask { try Self.scanTree(subfolder, folder: folder, metrics: metrics, progress: progress) }
+                }
+            }
+            return found
+        }
+        return items
+    }
+
+    /// Archivos y nombres de carpeta encontrados en un recorrido.
+    nonisolated private struct Listing {
         var files: [(url: URL, values: URLResourceValues)] = []
+        /// Nombres de carpetas por directorio, para saber si un comprimido ya está descomprimido.
+        var folderNames: [String: Set<String>] = [:]
 
-        for case let url as URL in enumerator {
-            try Task.checkCancellation()
-            guard let values = try? url.resourceValues(forKeys: Set(keys)) else { continue }
+        mutating func add(_ url: URL) {
+            guard let values = try? url.resourceValues(forKeys: Set(FilesEngine.keys)) else { return }
             if values.isRegularFile == true {
                 files.append((url, values))
             } else {
                 folderNames[url.deletingLastPathComponent().path, default: []].insert(url.lastPathComponent.lowercased())
             }
         }
+    }
 
+    /// Recorre una subcarpeta entera (síncrono: lo ejecuta una tarea del grupo).
+    private static func scanTree(_ root: URL, folder: URL, metrics: ScanMetrics, progress: AsyncStream<ScanProgress>.Continuation) throws -> [ScanItem] {
+        guard let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: keys,
+            options: [.skipsHiddenFiles, .skipsPackageDescendants]
+        ) else { return [] }
+
+        var listing = Listing()
+        var visited = 0
+        for case let url as URL in enumerator {
+            try Task.checkCancellation()
+            listing.add(url)
+            visited += 1
+            // Se cuenta por lotes para no bloquear el contador compartido en cada archivo.
+            if visited.isMultiple(of: 250) {
+                metrics.record(entries: 250, allocated: 0, reclaimable: 0)
+                let snapshot = metrics.snapshot
+                progress.yield(.metrics(entriesVisited: snapshot.entriesVisited, bytes: snapshot.allocatedBytes))
+            }
+        }
+        metrics.record(entries: visited % 250, allocated: 0, reclaimable: 0)
+        return classify(listing, folder: folder, metrics: metrics)
+    }
+
+    /// Decide qué se propone de cada archivo encontrado.
+    private static func classify(_ listing: Listing, folder: URL, metrics: ScanMetrics) -> [ScanItem] {
+        let files = listing.files
+        let folderNames = listing.folderNames
         var items: [ScanItem] = []
         for (url, values) in files {
             // En iCloud Drive y otros proveedores de Archivos, iOS a menudo no informa del
@@ -77,7 +155,7 @@ nonisolated struct FilesEngine: Sendable {
             let allocated = Int64(values.totalFileAllocatedSize ?? values.fileAllocatedSize ?? 0)
             let logical = Int64(values.totalFileSize ?? values.fileSize ?? 0)
             let bytes = allocated > 0 ? allocated : logical
-            metrics.record(entries: 1, allocated: bytes, reclaimable: bytes)
+            metrics.record(entries: 0, allocated: bytes, reclaimable: bytes)
             guard bytes > 0 else { continue }
 
             let ext = url.pathExtension.lowercased()

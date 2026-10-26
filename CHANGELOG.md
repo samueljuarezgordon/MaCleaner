@@ -1,24 +1,32 @@
 # Historial de cambios
 
-## Sin publicar
+## 1.1.0 — 2026-10-26
 
-### iPhone y iPad
-- **Liberar espacio purgable** («Datos del sistema»): hace que iOS vacíe las cachés de otras apps, los temporales y, con *Optimizar almacenamiento*, la caché de Fotos en iCloud, sin borrar ninguna foto.
-- **iCloud Drive**: libera copias locales sin borrarlas de iCloud.
-- **Archivos grandes y comprimidos** en las carpetas que elijas.
-- Ajustes › Carpetas analizadas, e invitación a elegirlas en la pantalla de inicio.
-- «Consejos» pasa a llamarse «Mantenimiento y consejos».
-- Guía paso a paso con animaciones para desinstalar apps pesadas (Offload).
+### iPhone y iPad: limpieza de la basura del sistema
+- **Datos del sistema purgables** en el análisis y la limpieza normales. MaCleaner hace que iOS vacíe las cachés de otras apps y de Safari, los temporales, el streaming, los restos de actualizaciones y, con *Optimizar almacenamiento*, los originales de Fotos que ya están en iCloud. No se borra ninguna foto ni documento.
+- La purga funciona de verdad: pide a iOS más espacio del que hay libre (como el truco de «alquilar una película enorme»), insiste mientras iOS libere y lo repite por oleadas. Tarda entre 1 y 5 minutos.
+- **Mantenimiento y consejos**: purga manual con un objetivo (1, 5, 10 o 20 GB, o todo lo posible), consejos de Ajustes y guía paso a paso para desinstalar apps pesadas sin perder sus datos (*Offload*).
 - Limpieza de la caché y los temporales de la propia app.
-- Purga: opción de cuánto liberar y explicación de la caché de Fotos en iCloud.
+
+### iPhone y iPad: calidad de vida
+- Al pulsar «Limpiar» se vuelve a la pantalla principal para ver el progreso.
+- La pantalla no se bloquea durante el análisis ni la limpieza: al bloquearse, iOS suspendía la app.
+- Vibración al terminar el análisis y la limpieza.
+- La purga se detiene y borra su archivo temporal si la app pasa a segundo plano.
+
+### iPhone y iPad: desactivado en esta versión
+Fototeca (duplicados de fotos y vídeos, capturas, ráfagas, vídeos grandes), iCloud Drive, archivos grandes y comprimidos. En dispositivos reales su análisis no terminaba. El código sigue en el proyecto detrás de `IOSCleaningEngine.includesPhotosAndFiles`, con estas mejoras ya hechas para cuando se retome:
+- Fotos y vídeos nunca se marcan solos, ninguna categoría de fotos es «segura» y todas avisan de que el borrado se sincroniza con iCloud.
+- Vídeos duplicados, aunque estén recomprimidos.
+- Comparación de duplicados con Accelerate, huellas guardadas entre análisis y análisis en segundo plano con Live Activity.
 
 ### Todas las plataformas
 - **Qué analizar**: elige módulos y categorías desde la pantalla de inicio o Ajustes. La elección se guarda.
 - Analizar un solo módulo conserva los resultados del resto.
+- Los avisos de progreso del análisis ya no se pueden perder (una categoría podía parecer en curso para siempre).
 
 ### Correcciones
-- iPad/iPhone: «Liberar espacio purgable» fallaba con «No queda espacio en el dispositivo». Ahora llena por tramos y trata el disco lleno como el objetivo, no como un error.
-- iPad/iPhone: los archivos de iCloud Drive y Archivos salían con 0 bytes porque iOS no informa del tamaño asignado. Ahora se usa el tamaño lógico.
+- iPhone/iPad: la purga fallaba con «No queda espacio en el dispositivo» y, después, apenas liberaba nada: dejaba 300 MB de margen y nunca pedía más espacio del que había, así que iOS no llegaba a purgar.
 
 ## 1.0.2 — 2026-10-23
 

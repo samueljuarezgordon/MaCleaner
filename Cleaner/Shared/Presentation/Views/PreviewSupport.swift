@@ -4,7 +4,7 @@ import SwiftUI
 /// Motor de ejemplo para las vistas previas: devuelve resultados al instante.
 nonisolated struct SampleCleaningEngine: CleaningEngine {
     var supportedCategories: [CleaningCategory] {
-        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive && $0 != .ownAppCache }
+        CleaningCategory.allCases.filter { $0.module != .photos && $0.module != .iCloudDrive && $0 != .ownAppCache && $0 != .systemData }
     }
 
     func scan(categories: Set<CleaningCategory>, progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary {

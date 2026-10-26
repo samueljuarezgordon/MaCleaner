@@ -40,6 +40,8 @@ final class CleanerViewModel {
     private(set) var phase: Phase = .idle
     private(set) var diskUsage: DiskUsage?
     private(set) var categoryStatus: [CleaningCategory: CategoryStatus] = [:]
+    /// Avance (0…1) de las categorías que lo informan mientras se analizan.
+    private(set) var categoryFraction: [CleaningCategory: Double] = [:]
     private(set) var entriesVisited = 0
     private(set) var bytesFound: Int64 = 0
     private(set) var lastScanDuration: Duration?
@@ -95,11 +97,26 @@ final class CleanerViewModel {
         lastReport = nil
         scanScope = modules.flatMap(\.categories).filter(scope.contains)
         categoryStatus = Dictionary(uniqueKeysWithValues: scanScope.map { ($0, .pending) })
+        categoryFraction = [:]
+
+        #if os(iOS)
+        // Que el análisis siga si el usuario sale de la app; si lo cancela desde la Live
+        // Activity, se detiene aquí también. Solo merece la pena con la Fototeca y las
+        // carpetas: la basura del sistema se analiza en un instante.
+        let backgroundSession: Int? = IOSCleaningEngine.includesPhotosAndFiles
+            ? BackgroundScanSession.shared.begin { [weak self] in
+                guard let self else { return }
+                Task { @MainActor in self.cancel() }
+            }
+            : nil
+        #endif
 
         activeTask = Task {
+            // Sin descartar eventos: si se perdiera un `.finished`, la categoría parecería
+            // analizarse para siempre. Los motores limitan la frecuencia del progreso.
             let (stream, continuation) = AsyncStream.makeStream(
                 of: ScanProgress.self,
-                bufferingPolicy: .bufferingNewest(64)
+                bufferingPolicy: .unbounded
             )
             // El consumo del progreso es una tarea hija estructurada: se cancela con el escaneo.
             async let consumption: Void = consume(stream)
@@ -117,6 +134,11 @@ final class CleanerViewModel {
             continuation.finish()
             await consumption
             refreshDiskUsage()
+            #if os(iOS)
+            if let backgroundSession {
+                BackgroundScanSession.shared.finish(generation: backgroundSession, success: phase == .results)
+            }
+            #endif
         }
     }
 
@@ -131,11 +153,29 @@ final class CleanerViewModel {
                 categoryStatus[category] = .scanning
             case .finished(let category, let bytes):
                 categoryStatus[category] = .done(bytes: bytes)
+                categoryFraction[category] = nil
+            case .fraction(let category, let done, let total):
+                if categoryStatus[category] == .scanning, total > 0 {
+                    categoryFraction[category] = min(1, Double(done) / Double(total))
+                }
             case .metrics(let entries, let bytes):
                 entriesVisited = entries
                 bytesFound = bytes
             }
+            #if os(iOS)
+            BackgroundScanSession.shared.update(
+                fraction: overallScanFraction,
+                subtitle: String(localized: "\(completedCategoryCount) de \(totalCategoryCount) categorías · \(bytesFound.byteString) encontrados")
+            )
+            #endif
         }
+    }
+
+    /// Avance global del análisis: categorías terminadas más la parte hecha de las que informan.
+    var overallScanFraction: Double {
+        guard totalCategoryCount > 0 else { return 0 }
+        let partial = categoryFraction.values.reduce(0, +)
+        return (Double(completedCategoryCount) + partial) / Double(totalCategoryCount)
     }
 
     // MARK: - Limpieza
@@ -185,10 +225,12 @@ final class CleanerViewModel {
     }
 
     /// Selecciona todo lo que tenga como mucho `maxRisk` (o nada si es `nil`) en `module`,
-    /// o en todos los módulos si `module` es `nil`.
+    /// o en todos los módulos si `module` es `nil`. Las fotos solo se marcan desde su módulo.
     func select(upTo maxRisk: RiskLevel?, in module: CleaningModule? = nil) {
         let scope = module.map(items(in:)) ?? items
         for item in scope {
+            // Desde la vista general, las fotos no se tocan: se eligen dentro de su módulo.
+            if module == nil, maxRisk != nil, item.removal.needsExplicitChoice { continue }
             if let maxRisk, item.risk <= maxRisk {
                 selection.insert(item.id)
             } else {
@@ -233,8 +275,11 @@ final class CleanerViewModel {
         apply(items: kept + fresh, inaccessible: inaccessible)
 
         // La selección inicial depende de la preferencia del usuario (por defecto, lo seguro).
+        // Las fotos y vídeos nunca se marcan solos: los elige siempre el usuario.
         let policy = Preferences.defaultSelection
-        selection = keptSelection.union(fresh.filter { item in policy.maxRisk.map { item.risk <= $0 } ?? false }.map(\.id))
+        selection = keptSelection.union(fresh.filter { item in
+            !item.removal.needsExplicitChoice && (policy.maxRisk.map { item.risk <= $0 } ?? false)
+        }.map(\.id))
         updateSelectedStats()
     }
 

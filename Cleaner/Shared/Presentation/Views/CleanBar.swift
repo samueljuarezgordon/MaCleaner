@@ -64,6 +64,15 @@ struct CleanReviewSheet: View {
                     }
                 }
 
+                if photoCount > 0 {
+                    Section {
+                        Label("\(photoCount) fotos y vídeos se borrarán de tu fototeca", systemImage: "photo.on.rectangle.angled")
+                            .foregroundStyle(.orange)
+                    } footer: {
+                        Text("Van a «Eliminados recientemente» durante 30 días. Si usas Fotos en iCloud, se borran también de iCloud y de tus otros dispositivos. iOS te pedirá confirmación antes de borrarlas.")
+                    }
+                }
+
                 Section("Por nivel de riesgo") {
                     ForEach(RiskLevel.allCases) { risk in
                         LabeledContent {
@@ -137,6 +146,10 @@ struct CleanReviewSheet: View {
         #if os(macOS)
         .frame(minWidth: 480, idealWidth: 520, minHeight: 520)
         #endif
+    }
+
+    private var photoCount: Int {
+        viewModel.selectedItems().count { $0.removal == .photoLibrary }
     }
 
     private var startupCount: Int {
