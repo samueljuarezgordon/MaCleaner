@@ -90,7 +90,7 @@ Se leen los plist de `~/Library/LaunchAgents`, `/Library/LaunchAgents` y `/Libra
 | Datos del sistema purgables | `volumeAvailableCapacityForImportantUsage − volumeAvailableCapacity` (lo que iOS considera prescindible) | Seguro | iOS los purga al pedirle MaCleaner el espacio (`PurgeableSpaceReclaimer`) |
 | Caché de MaCleaner | Contenido de `cachesDirectory` y `tmp` de la propia app | Seguro | Definitivo |
 
-### Desactivadas en la 1.1.0
+### Desactivadas desde la 1.1.0
 
 Activables con `IOSCleaningEngine.includesPhotosAndFiles`. En dispositivos reales su análisis no terminaba.
 

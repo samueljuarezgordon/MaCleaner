@@ -106,83 +106,123 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
 
     // MARK: - Limpieza
 
+    /// Elimina los elementos uno a uno, en el orden recibido, informando de cada uno.
+    ///
+    /// Cada paso se espera con `abandoningOnCancel`: al detener la limpieza se deja de esperar
+    /// al instante, aunque el paso (un borrado enorme, simctl, el asistente) siga en segundo plano.
     @concurrent
-    func clean(_ items: [ScanItem]) async throws -> CleaningReport {
+    func clean(_ items: [ScanItem], progress: AsyncStream<CleaningProgress>.Continuation) async throws -> CleaningReport {
         var reclaimed: Int64 = 0
         var trashed: Int64 = 0
         var failures: [String] = []
         var disabled = 0
-        let fileManager = FileManager.default
+        /// Si el asistente respondió a la primera comprobación (`nil` hasta que haga falta).
+        var helperResponds: Bool?
 
-        for item in items {
-            try Task.checkCancellation()
+        for (index, item) in items.enumerated() {
+            if Task.isCancelled {
+                for pending in items[index...] {
+                    progress.yield(.finished(pending.id, .skipped(String(localized: "No se llegó a eliminar: limpieza detenida."))))
+                }
+                failures.append(String(localized: "Limpieza detenida: \(items.count - index) elementos sin tocar."))
+                break
+            }
+
             // Un elemento ya borrado por otro (p. ej. datos de una app desinstalada) no es un error.
-            if item.id.hasPrefix("/"), !fileManager.fileExists(atPath: item.id) { continue }
-            do {
-                switch item.removal {
-                case .delete:
-                    try fileManager.removeItem(atPath: item.id)
-                    reclaimed += item.reclaimableBytes
-                case .moveToTrash:
-                    try fileManager.trashItem(at: URL(fileURLWithPath: item.id), resultingItemURL: nil)
-                    trashed += item.reclaimableBytes
-                case .simulatorDevice(let udid):
-                    try Self.check(await SimulatorCleaner.deleteDevice(udid: udid))
-                    reclaimed += item.reclaimableBytes
-                case .simulatorRuntime(let identifier):
-                    try Self.check(await SimulatorCleaner.deleteRuntime(identifier: identifier))
-                    reclaimed += item.reclaimableBytes
-                case .uninstallApp(let relatedPaths):
-                    // NSWorkspace se comporta como el Finder: pide contraseña si la app es de root.
-                    _ = try await NSWorkspace.shared.recycle([URL(fileURLWithPath: item.id)])
-                    for path in relatedPaths where fileManager.fileExists(atPath: path) {
-                        try? fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
-                    }
-                    trashed += item.reclaimableBytes
-                case .launchAgent(let label):
-                    await LaunchItemStatus.bootoutUserService(label)
-                    try fileManager.trashItem(at: URL(fileURLWithPath: item.id), resultingItemURL: nil)
-                    disabled += 1
-                case .systemLaunchItem(let label):
-                    // Los agentes de /Library se cargan en la sesión del usuario: se detienen aquí.
-                    if item.id.hasPrefix("/Library/LaunchAgents/") {
-                        await LaunchItemStatus.bootoutUserService(label)
-                    }
-                    let result: (removed: Bool, message: String)
-                    do {
-                        result = try await helper.removeLaunchItem(atPath: item.id)
-                    } catch {
-                        // Un asistente 1.0 no conoce esta operación: XPC devuelve un error genérico.
-                        failures.append("\(item.displayName): el asistente privilegiado no responde o está desactualizado. Reinstálalo en Mantenimiento y permisos.")
-                        continue
-                    }
-                    if result.removed {
-                        disabled += 1
-                    } else {
-                        failures.append("\(item.displayName): \(result.message)")
-                    }
-                case .privileged, .photoLibrary, .evictFromDevice, .systemPurge:
+            if item.id.hasPrefix("/"), !FileManager.default.fileExists(atPath: item.id) {
+                progress.yield(.finished(item.id, .alreadyGone))
+                continue
+            }
+
+            // Antes del primer elemento del sistema se comprueba que el asistente responde:
+            // si no, cada llamada XPC podría quedarse esperando para siempre.
+            if item.removal == .privileged || item.removal.isSystemLaunchItem {
+                if helperResponds == nil {
+                    progress.yield(.started(item.id, step: String(localized: "Comprobando que el asistente privilegiado responde")))
+                    helperResponds = await helper.installedVersion(timeout: .seconds(5)) != nil
+                }
+                if helperResponds == false {
+                    let message = String(localized: "el asistente privilegiado no responde. Instálalo (o reinstálalo) y apruébalo en Mantenimiento y permisos.")
+                    failures.append("\(item.displayName): \(message)")
+                    progress.yield(.finished(item.id, .failed(message)))
                     continue
                 }
-            } catch {
-                failures.append("\(item.displayName): \(error.localizedDescription)")
             }
-        }
 
-        // Rutas del sistema: el demonio vuelve a validar la firma y la lista blanca.
-        let privileged = items.filter { $0.removal == .privileged }
-        if !privileged.isEmpty {
+            progress.yield(.started(item.id, step: String(localized: item.removal.progressStep)))
+            let outcome: CleaningItemOutcome
             do {
-                let result = try await helper.removeItems(atPaths: privileged.map(\.id))
-                let removed = Set(result.removed)
-                reclaimed += privileged.filter { removed.contains($0.id) }.reduce(0) { $0 + $1.reclaimableBytes }
-                failures += result.failures
+                outcome = try await abandoningOnCancel { [helper] in
+                    try await Self.remove(item, helper: helper)
+                }
+            } catch is CancellationError {
+                outcome = .failed(String(localized: "Detenido mientras se eliminaba; macOS puede terminarlo en segundo plano."))
             } catch {
-                failures.append("Elementos del sistema: instala (o reinstala) y aprueba el asistente privilegiado en Mantenimiento y permisos (\(error.localizedDescription)).")
+                outcome = .failed(error.localizedDescription)
             }
+
+            switch outcome {
+            case .removed: reclaimed += item.reclaimableBytes
+            case .trashed: trashed += item.reclaimableBytes
+            case .disabled: disabled += 1
+            case .failed(let message): failures.append("\(item.displayName): \(message)")
+            case .alreadyGone, .skipped: break
+            }
+            progress.yield(.finished(item.id, outcome))
         }
 
         return CleaningReport(reclaimedBytes: reclaimed, trashedBytes: trashed, failures: failures, disabledStartupItems: disabled)
+    }
+
+    @concurrent
+    private static func remove(_ item: ScanItem, helper: HelperClient) async throws -> CleaningItemOutcome {
+        let fileManager = FileManager.default
+        switch item.removal {
+        case .delete:
+            try fileManager.removeItem(atPath: item.id)
+            return .removed
+        case .moveToTrash:
+            try fileManager.trashItem(at: URL(fileURLWithPath: item.id), resultingItemURL: nil)
+            return .trashed
+        case .simulatorDevice(let udid):
+            try check(await SimulatorCleaner.deleteDevice(udid: udid))
+            return .removed
+        case .simulatorRuntime(let identifier):
+            try check(await SimulatorCleaner.deleteRuntime(identifier: identifier))
+            return .removed
+        case .uninstallApp(let relatedPaths):
+            // NSWorkspace se comporta como el Finder: pide contraseña si la app es de root.
+            _ = try await NSWorkspace.shared.recycle([URL(fileURLWithPath: item.id)])
+            for path in relatedPaths where fileManager.fileExists(atPath: path) {
+                try? fileManager.trashItem(at: URL(fileURLWithPath: path), resultingItemURL: nil)
+            }
+            return .trashed
+        case .launchAgent(let label):
+            await LaunchItemStatus.bootoutUserService(label)
+            try fileManager.trashItem(at: URL(fileURLWithPath: item.id), resultingItemURL: nil)
+            return .disabled
+        case .systemLaunchItem(let label):
+            // Los agentes de /Library se cargan en la sesión del usuario: se detienen aquí.
+            if item.id.hasPrefix("/Library/LaunchAgents/") {
+                await LaunchItemStatus.bootoutUserService(label)
+            }
+            let result: (removed: Bool, message: String)
+            do {
+                result = try await helper.removeLaunchItem(atPath: item.id)
+            } catch {
+                // Un asistente 1.0 no conoce esta operación: XPC devuelve un error genérico.
+                return .failed(String(localized: "el asistente privilegiado no responde o está desactualizado. Reinstálalo en Mantenimiento y permisos."))
+            }
+            return result.removed ? .disabled : .failed(result.message)
+        case .privileged:
+            // Rutas del sistema: el demonio vuelve a validar la firma y la lista blanca.
+            // Se piden de una en una para poder seguir el avance y ver cuál se atasca.
+            let result = try await helper.removeItems(atPaths: [item.id])
+            if result.removed.contains(item.id) { return .removed }
+            return .failed(result.failures.first ?? String(localized: "el asistente no pudo borrarlo."))
+        case .photoLibrary, .evictFromDevice, .systemPurge:
+            return .skipped(String(localized: "No se puede eliminar en macOS."))
+        }
     }
 
     private struct CommandFailed: LocalizedError {
@@ -195,6 +235,12 @@ nonisolated struct MacCleaningEngine: CleaningEngine {
 
     private static func check(_ output: ProcessOutput) throws {
         guard output.succeeded else { throw CommandFailed(output: output) }
+    }
+}
+
+private extension RemovalMethod {
+    nonisolated var isSystemLaunchItem: Bool {
+        if case .systemLaunchItem = self { true } else { false }
     }
 }
 #endif

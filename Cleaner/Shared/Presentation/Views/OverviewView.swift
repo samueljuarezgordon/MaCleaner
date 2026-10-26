@@ -22,6 +22,9 @@ struct OverviewView: View {
                 case .results:
                     ResultsSummary(viewModel: viewModel, destination: $destination)
                 case .cleaning:
+                    #if os(macOS)
+                    CleaningProgressView(viewModel: viewModel)
+                    #else
                     ScanRing(
                         title: "Limpiando",
                         value: viewModel.selectedStats.totalBytes.byteString,
@@ -34,6 +37,7 @@ struct OverviewView: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                     }
+                    #endif
                 case .done:
                     CleaningReportView(viewModel: viewModel)
                 }
@@ -55,9 +59,18 @@ struct OverviewView: View {
 struct ScanToolbarButton: View {
     let viewModel: CleanerViewModel
 
+    /// Solo el motor de macOS limpia elemento a elemento y puede detenerse a medias.
+    #if os(macOS)
+    private static let canStopCleaning = true
+    #else
+    private static let canStopCleaning = false
+    #endif
+
     var body: some View {
         if viewModel.phase == .scanning {
             Button("Detener", systemImage: "stop.fill", action: viewModel.cancel)
+        } else if viewModel.phase == .cleaning, Self.canStopCleaning {
+            Button("Detener limpieza", systemImage: "stop.fill", action: viewModel.cancel)
         } else {
             Button(viewModel.hasResults ? "Volver a analizar" : "Analizar", systemImage: "arrow.clockwise", action: viewModel.startScan)
                 .disabled(viewModel.phase == .cleaning || viewModel.enabledCategories.isEmpty)

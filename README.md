@@ -88,7 +88,7 @@ Misma interfaz que en el Mac, centrada en lo único que el sandbox de iOS deja h
 
 Al pulsar **Limpiar**, la app vuelve a la pantalla principal para mostrar el progreso. La pantalla no se bloquea mientras analiza o limpia.
 
-> **Fototeca, iCloud Drive, archivos grandes y comprimidos** están desactivados en la 1.1.0: en dispositivos reales su análisis no terminaba. El código sigue en el proyecto (`IOSCleaningEngine.includesPhotosAndFiles`) para retomarlo.
+> **Fototeca, iCloud Drive, archivos grandes y comprimidos** están desactivados desde la 1.1.0: en dispositivos reales su análisis no terminaba. El código sigue en el proyecto (`IOSCleaningEngine.includesPhotosAndFiles`) para retomarlo.
 
 #### Qué no puede hacer ninguna app en iOS
 

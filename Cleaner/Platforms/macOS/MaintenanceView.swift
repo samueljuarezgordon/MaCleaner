@@ -89,6 +89,28 @@ enum MaintenanceAction: String, Identifiable, CaseIterable {
         }
     }
 
+    /// Qué suele retener la acción cuando tarda demasiado.
+    var stallHint: LocalizedStringResource {
+        switch self {
+        case .thinSnapshots:
+            "tmutil puede tardar varios minutos con muchas instantáneas grandes, y no suelta las que usa una copia de Time Machine en curso."
+        case .deleteUnusableSimulators, .eraseSimulators:
+            "simctl espera a CoreSimulator. Cierra Xcode y el Simulador si están abiertos."
+        case .rebuildLaunchServices:
+            "lsregister vuelve a registrar todas las apps del disco; con muchas apps tarda unos minutos."
+        case .resetQuickLook:
+            "qlmanage espera a que el servicio de Vista rápida se reinicie."
+        }
+    }
+
+    /// A partir de aquí la acción se considera lenta y se explica qué suele retenerla.
+    var stallThreshold: TimeInterval {
+        switch self {
+        case .thinSnapshots, .rebuildLaunchServices: 60
+        case .deleteUnusableSimulators, .eraseSimulators, .resetQuickLook: 30
+        }
+    }
+
     var afterwards: LocalizedStringResource {
         switch self {
         case .thinSnapshots:
@@ -134,6 +156,9 @@ final class MaintenanceModel {
     private(set) var helperVersion: String?
     private(set) var isCheckingHelper = false
     private(set) var isReinstallingHelper = false
+    /// Resultado del último diagnóstico del asistente (`nil` si no se ha hecho).
+    private(set) var diagnostics: [HelperDiagnostics.Check]?
+    private(set) var isDiagnosing = false
 
     /// El demonio activo es de una versión anterior a la que espera la app.
     var isHelperOutdated: Bool {
@@ -184,6 +209,16 @@ final class MaintenanceModel {
             if helperState == .requiresApproval {
                 HelperInstaller.openApprovalSettings()
             }
+        }
+    }
+
+    func diagnoseHelper() {
+        guard !isDiagnosing else { return }
+        isDiagnosing = true
+        Task {
+            diagnostics = await HelperDiagnostics.run()
+            isDiagnosing = false
+            refresh()
         }
     }
 
@@ -311,20 +346,58 @@ final class MaintenanceModel {
 
     // MARK: - Ejecución
 
+    /// Lo que se ve mientras corre una acción: paso, tiempo, avance y qué la retiene.
+    struct Activity {
+        var step: String
+        let since = Date.now
+        /// Avance medido (por ejemplo, instantáneas que quedan y espacio ya liberado).
+        var detail: String?
+        /// Algo concreto que impide avanzar, detectado mientras corre.
+        var blocker: String?
+    }
+
+    private(set) var activity: Activity?
+    private var runningTask: Task<Void, Never>?
+
+    private struct HelperUnresponsive: LocalizedError {
+        var errorDescription: String? {
+            String(localized: "El asistente privilegiado no responde. Reinstálalo arriba y apruébalo en Ajustes del Sistema.")
+        }
+    }
+
     func perform(_ action: MaintenanceAction) {
         guard running == nil else { return }
         running = action
         outcomes[action] = nil
         let before = DiskUsage.current()?.availableBytes ?? 0
+        append("— \(String(localized: action.title)): inicio")
 
-        Task {
+        runningTask = Task {
+            var monitor: Task<Void, Never>?
             do {
-                let outputs: [ProcessOutput] = switch action {
-                case .thinSnapshots: [try await HelperClient.shared.thinLocalSnapshots()]
-                case .deleteUnusableSimulators: try await SimulatorCleaner.deleteUnusableRuntimes()
-                case .eraseSimulators: [try await SimulatorCleaner.eraseAllSimulators()]
-                case .rebuildLaunchServices: [try await SystemRepair.rebuildLaunchServices()]
-                case .resetQuickLook: try await SystemRepair.resetQuickLook()
+                let outputs: [ProcessOutput]
+                switch action {
+                case .thinSnapshots:
+                    // Si el asistente no responde, la llamada XPC podría no volver nunca.
+                    step("Comprobando que el asistente privilegiado responde")
+                    guard await HelperClient.shared.installedVersion(timeout: .seconds(5)) != nil else {
+                        throw HelperUnresponsive()
+                    }
+                    step("macOS está purgando las instantáneas (tmutil thinlocalsnapshots)")
+                    monitor = Task { await watchThinning(freeBefore: before) }
+                    outputs = [try await abandoningOnCancel { try await HelperClient.shared.thinLocalSnapshots() }]
+                case .deleteUnusableSimulators:
+                    step("Eliminando runtimes y simuladores inutilizables (simctl)")
+                    outputs = try await abandoningOnCancel { try await SimulatorCleaner.deleteUnusableRuntimes() }
+                case .eraseSimulators:
+                    step("Apagando y restableciendo todos los simuladores (simctl)")
+                    outputs = [try await abandoningOnCancel { try await SimulatorCleaner.eraseAllSimulators() }]
+                case .rebuildLaunchServices:
+                    step("Reconstruyendo la base de datos de apps (lsregister)")
+                    outputs = [try await abandoningOnCancel { try await SystemRepair.rebuildLaunchServices() }]
+                case .resetQuickLook:
+                    step("Restableciendo Vista rápida (qlmanage)")
+                    outputs = try await abandoningOnCancel { try await SystemRepair.resetQuickLook() }
                 }
                 outputs.forEach { append("[\($0.exitCode)] \($0.output)") }
 
@@ -334,17 +407,79 @@ final class MaintenanceModel {
                 } else {
                     outcomes[action] = .success(freedBytes: max(0, after - before), message: nil)
                 }
+            } catch is CancellationError {
+                let message = String(localized: "Dejaste de esperar. macOS puede seguir terminándolo en segundo plano.")
+                outcomes[action] = .failure(message)
+                append("\(String(localized: action.title)): \(message)")
             } catch {
                 outcomes[action] = .failure(error.localizedDescription)
                 append("\(String(localized: action.title)): \(error.localizedDescription)")
             }
+            monitor?.cancel()
+            if let since = activity?.since {
+                append("— \(String(localized: action.title)): fin tras \(Duration.seconds(Int(Date.now.timeIntervalSince(since))).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow)))")
+            }
+            activity = nil
             running = nil
+            runningTask = nil
             await measure()
         }
     }
 
+    /// Deja de esperar a la acción en curso. Lo que ya pidió al sistema no se puede deshacer.
+    func stopWaiting() {
+        runningTask?.cancel()
+    }
+
+    private func step(_ text: String) {
+        if activity == nil {
+            activity = Activity(step: text)
+        } else {
+            activity?.step = text
+        }
+        append(text)
+    }
+
+    /// Mientras se purgan las instantáneas, mide cuántas quedan y cuánto se ha liberado, y
+    /// detecta una copia de Time Machine en curso, que retiene las instantáneas hasta terminar.
+    private func watchThinning(freeBefore: Int64) async {
+        var lastRemaining: Int?
+        var wasBackingUp = false
+        while !Task.isCancelled {
+            async let list = try? ProcessRunner.run("/usr/bin/tmutil", arguments: ["listlocalsnapshots", "/"])
+            async let status = try? ProcessRunner.run("/usr/bin/tmutil", arguments: ["status"])
+            let remaining = await list.map { Self.snapshotCount(in: $0.output) }
+            let isBackingUp = await status.map { $0.output.contains("Running = 1") } ?? false
+            guard !Task.isCancelled else { return }
+
+            let freed = max(0, (DiskUsage.current()?.availableBytes ?? freeBefore) - freeBefore)
+            var parts: [String] = []
+            if let remaining { parts.append(String(localized: "Quedan \(remaining) instantáneas")) }
+            parts.append(String(localized: "\(freed.byteString) liberados"))
+            activity?.detail = parts.joined(separator: " · ")
+            activity?.blocker = isBackingUp
+                ? String(localized: "Time Machine está haciendo una copia ahora mismo y macOS no suelta las instantáneas hasta que termine. Espera a que acabe o detenla desde el menú de Time Machine.")
+                : nil
+
+            if let remaining, remaining != lastRemaining {
+                append("Quedan \(remaining) instantáneas · \(freed.byteString) liberados")
+                lastRemaining = remaining
+            }
+            if isBackingUp != wasBackingUp {
+                append(isBackingUp ? "Time Machine está haciendo una copia" : "La copia de Time Machine ha terminado")
+                wasBackingUp = isBackingUp
+            }
+            try? await Task.sleep(for: .seconds(3))
+        }
+    }
+
+    private nonisolated static func snapshotCount(in output: String) -> Int {
+        output.split(separator: "\n").count { $0.contains("com.apple.TimeMachine.") }
+    }
+
     private func append(_ line: String) {
-        log += line.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
+        let time = Date.now.formatted(date: .omitted, time: .standard)
+        log += "\(time)  " + line.trimmingCharacters(in: .whitespacesAndNewlines) + "\n"
     }
 }
 
@@ -372,6 +507,8 @@ struct MaintenanceView: View {
                         estimate: model.estimates[action],
                         isMeasuring: model.isMeasuring && action.freesSpace,
                         isRunning: model.running == action,
+                        activity: model.running == action ? model.activity : nil,
+                        stopWaiting: model.stopWaiting,
                         isDisabled: model.running != nil || (action == .thinSnapshots && model.helperState != .enabled),
                         disabledReason: action == .thinSnapshots && model.helperState != .enabled
                             ? "Requiere el asistente privilegiado (arriba)." : nil,
@@ -448,6 +585,8 @@ private struct MaintenanceCard: View {
     let estimate: MaintenanceModel.Estimate?
     let isMeasuring: Bool
     let isRunning: Bool
+    let activity: MaintenanceModel.Activity?
+    let stopWaiting: () -> Void
     let isDisabled: Bool
     let disabledReason: String?
     let outcome: MaintenanceModel.Outcome?
@@ -511,6 +650,10 @@ private struct MaintenanceCard: View {
                 }
             }
 
+            if let activity {
+                ActivityPanel(action: action, activity: activity, stopWaiting: stopWaiting)
+            }
+
             HStack(spacing: 12) {
                 Button(action: perform) {
                     if isRunning {
@@ -556,6 +699,59 @@ private struct MaintenanceCard: View {
         case .eraseSimulators: "Restablecer simuladores\(size)"
         case .rebuildLaunchServices: "Reconstruir"
         case .resetQuickLook: "Restablecer"
+        }
+    }
+}
+
+/// Paso en curso, tiempo transcurrido, avance medido y lo que retiene la acción.
+private struct ActivityPanel: View {
+    let action: MaintenanceAction
+    let activity: MaintenanceModel.Activity
+    let stopWaiting: () -> Void
+
+    var body: some View {
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            let elapsed = max(0, context.date.timeIntervalSince(activity.since))
+            let isSlow = elapsed >= action.stallThreshold
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 10) {
+                    ProgressView().controlSize(.small)
+                    Text(activity.step)
+                        .font(.callout)
+                    Spacer()
+                    Text(Duration.seconds(Int(elapsed)).formatted(.units(allowed: [.hours, .minutes, .seconds], width: .narrow)))
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(isSlow || activity.blocker != nil ? .orange : .secondary)
+                        .contentTransition(.numericText())
+                    Button("Dejar de esperar", action: stopWaiting)
+                        .controlSize(.small)
+                        .help("La app deja de esperar; lo que ya se pidió a macOS puede seguir en segundo plano")
+                }
+                if let detail = activity.detail {
+                    Text(detail)
+                        .font(.callout.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                        .contentTransition(.numericText())
+                }
+                if let blocker = activity.blocker {
+                    Label(blocker, systemImage: "lock.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if isSlow {
+                    Label {
+                        Text("Está tardando más de lo normal. \(String(localized: action.stallHint))")
+                    } icon: {
+                        Image(systemName: "hourglass")
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(action.tint.opacity(0.08), in: .rect(cornerRadius: 12))
         }
     }
 }
@@ -671,6 +867,8 @@ private struct HelperStatusDetails: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
             .font(.callout)
+
+            DiagnosticsSection(model: model)
         }
         .padding(.leading, 40)
     }
@@ -690,6 +888,77 @@ private struct HelperStatusDetails: View {
                 .background(.tint.opacity(0.2), in: .circle)
             Text(text)
                 .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Diagnóstico paso a paso del asistente, con un informe que se puede copiar.
+private struct DiagnosticsSection: View {
+    let model: MaintenanceModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Button(action: model.diagnoseHelper) {
+                    if model.isDiagnosing {
+                        Label {
+                            Text("Diagnosticando…")
+                        } icon: {
+                            ProgressView().controlSize(.small)
+                        }
+                    } else {
+                        Label("Diagnosticar el asistente", systemImage: "stethoscope")
+                    }
+                }
+                .disabled(model.isDiagnosing)
+                if let checks = model.diagnostics, !model.isDiagnosing {
+                    Button("Copiar informe", systemImage: "doc.on.doc") {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(HelperDiagnostics.report(checks), forType: .string)
+                    }
+                }
+            }
+            if let checks = model.diagnostics {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(checks) { check in
+                        HStack(alignment: .firstTextBaseline, spacing: 8) {
+                            Image(systemName: symbol(for: check.status))
+                                .foregroundStyle(color(for: check.status))
+                                .frame(width: 16)
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(check.title)
+                                    .font(.callout.weight(.medium))
+                                Text(check.detail)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .textSelection(.enabled)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.fill.quaternary, in: .rect(cornerRadius: 10))
+            }
+        }
+    }
+
+    private func symbol(for status: HelperDiagnostics.Check.Status) -> String {
+        switch status {
+        case .ok: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .failure: "xmark.octagon.fill"
+        case .info: "info.circle.fill"
+        }
+    }
+
+    private func color(for status: HelperDiagnostics.Check.Status) -> Color {
+        switch status {
+        case .ok: .green
+        case .warning: .orange
+        case .failure: .red
+        case .info: .secondary
         }
     }
 }

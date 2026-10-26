@@ -9,7 +9,7 @@ nonisolated enum HelperConstants {
 
     /// Versión del demonio que espera esta versión de la app. Súbela cada vez que cambie
     /// `HelperProtocol` o `PrivilegedService`: la app ofrecerá reinstalarlo.
-    static let helperVersion = "1.1.0"
+    static let helperVersion = "1.2.0"
 
     /// Debe coincidir con `MachServices` del launchd.plist.
     static let machServiceName = "com.tuempresa.Cleaner.Helper"

@@ -95,6 +95,41 @@ nonisolated enum RemovalMethod: Sendable, Hashable {
         case .delete, .privileged, .simulatorDevice, .simulatorRuntime, .systemLaunchItem, .systemPurge: false
         }
     }
+
+    /// Qué se está haciendo mientras se elimina, para el progreso de la limpieza.
+    var progressStep: LocalizedStringResource {
+        switch self {
+        case .delete: "Borrando"
+        case .moveToTrash: "Moviendo a la Papelera"
+        case .privileged: "Borrando con el asistente privilegiado"
+        case .photoLibrary: "Enviando a «Eliminados recientemente»"
+        case .simulatorDevice: "Apagando y eliminando el simulador (simctl)"
+        case .simulatorRuntime: "Eliminando el runtime (simctl)"
+        case .uninstallApp: "Moviendo la app y sus datos a la Papelera"
+        case .launchAgent: "Deteniendo el servicio y moviéndolo a la Papelera"
+        case .systemLaunchItem: "Deteniendo y borrando el servicio con el asistente privilegiado"
+        case .evictFromDevice: "Borrando la copia local"
+        case .systemPurge: "Purgando los datos del sistema"
+        }
+    }
+
+    /// Qué suele retener la eliminación cuando tarda demasiado.
+    var stallHint: LocalizedStringResource {
+        switch self {
+        case .delete, .moveToTrash:
+            "Suele ser una carpeta con muchísimos archivos o en uso por otra app. Si pertenece a una app abierta, ciérrala."
+        case .privileged, .systemLaunchItem:
+            "El asistente privilegiado sigue trabajando o no responde. Si no avanza, detén la limpieza y reinstálalo en Mantenimiento y permisos."
+        case .simulatorDevice, .simulatorRuntime:
+            "simctl espera a CoreSimulator. Cierra Xcode y el Simulador si están abiertos."
+        case .uninstallApp:
+            "macOS puede estar esperando tu contraseña en otra ventana, o la app sigue abierta. Revisa si hay un diálogo pendiente o cierra la app."
+        case .launchAgent:
+            "El servicio tarda en detenerse. Si no avanza, cierra la app a la que pertenece."
+        case .photoLibrary, .evictFromDevice, .systemPurge:
+            "El sistema sigue trabajando. Mantén MaCleaner abierta."
+        }
+    }
 }
 
 // MARK: - Categorías y módulos
@@ -506,6 +541,32 @@ nonisolated enum ScanProgress: Sendable {
     case fraction(CleaningCategory, done: Int, total: Int)
 }
 
+/// Cómo terminó la eliminación de un elemento.
+nonisolated enum CleaningItemOutcome: Sendable, Equatable {
+    case removed
+    case trashed
+    case disabled
+    /// Ya no existía (lo borró otro elemento o el usuario).
+    case alreadyGone
+    case failed(String)
+    /// No se llegó a intentar (por ejemplo, porque se detuvo la limpieza).
+    case skipped(String)
+
+    var succeeded: Bool {
+        switch self {
+        case .removed, .trashed, .disabled, .alreadyGone: true
+        case .failed, .skipped: false
+        }
+    }
+}
+
+/// Avance de una limpieza, elemento a elemento.
+nonisolated enum CleaningProgress: Sendable {
+    /// Empieza (o cambia de paso) la eliminación de un elemento.
+    case started(ScanItem.ID, step: String)
+    case finished(ScanItem.ID, CleaningItemOutcome)
+}
+
 /// Contrato común de los motores de limpieza de cada plataforma.
 nonisolated protocol CleaningEngine: Sendable {
     var supportedCategories: [CleaningCategory] { get }
@@ -513,8 +574,9 @@ nonisolated protocol CleaningEngine: Sendable {
     /// Analiza solo `categories`, emitiendo progreso en `progress`. El motor no cierra el stream.
     func scan(categories: Set<CleaningCategory>, progress: AsyncStream<ScanProgress>.Continuation) async throws -> ScanSummary
 
-    /// Elimina los elementos indicados según su `removal`.
-    func clean(_ items: [ScanItem]) async throws -> CleaningReport
+    /// Elimina los elementos indicados según su `removal`, en ese orden, emitiendo el avance
+    /// de cada uno en `progress`. El motor no cierra el stream.
+    func clean(_ items: [ScanItem], progress: AsyncStream<CleaningProgress>.Continuation) async throws -> CleaningReport
 }
 
 extension CleaningEngine {

@@ -250,6 +250,11 @@ nonisolated struct PhotoLibraryEngine: CleaningEngine {
 
     // MARK: - Limpieza
 
+    /// Se borran todos de una vez: no hay avance elemento a elemento.
+    func clean(_ items: [ScanItem], progress: AsyncStream<CleaningProgress>.Continuation) async throws -> CleaningReport {
+        try await clean(items)
+    }
+
     /// Borra los assets. iOS muestra su propia confirmación al usuario y los mueve a
     /// "Eliminados recientemente", así que el espacio se libera del todo al vaciar esa
     /// carpeta o pasados 30 días.

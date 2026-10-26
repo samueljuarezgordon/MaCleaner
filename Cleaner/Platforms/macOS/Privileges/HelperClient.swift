@@ -11,15 +11,26 @@ actor HelperClient {
     enum ClientError: LocalizedError {
         case unsignedApplication
         case invalidProxy
+        case timedOut(Duration)
 
         var errorDescription: String? {
             switch self {
             case .unsignedApplication:
-                "La app no está firmada con un certificado de equipo; no es posible validar al demonio."
+                String(localized: "La app no está firmada con un certificado de equipo; no es posible validar al demonio.")
             case .invalidProxy:
-                "El demonio no expone la interfaz esperada."
+                String(localized: "El demonio no expone la interfaz esperada.")
+            case .timedOut(let limit):
+                String(localized: "El asistente privilegiado no respondió en \(limit.formatted(.units(allowed: [.minutes, .seconds], width: .wide))). Reinstálalo en Mantenimiento y permisos.")
             }
         }
+    }
+
+    /// Plazos máximos de cada operación. Son generosos: solo cortan esperas que nunca acabarían.
+    enum Timeout {
+        static let version: Duration = .seconds(10)
+        static let removeItems: Duration = .seconds(10 * 60)
+        static let thinSnapshots: Duration = .seconds(30 * 60)
+        static let launchItem: Duration = .seconds(2 * 60)
     }
 
     private var connection: NSXPCConnection?
@@ -27,7 +38,7 @@ actor HelperClient {
     // MARK: - Operaciones
 
     func version() async throws -> String {
-        try await call { proxy, once in
+        try await call(timeout: Timeout.version) { proxy, once in
             proxy.version { once.resume(returning: $0) }
         }
     }
@@ -47,7 +58,7 @@ actor HelperClient {
     }
 
     func removeItems(atPaths paths: [String]) async throws -> (removed: [String], failures: [String]) {
-        try await call { proxy, once in
+        try await call(timeout: Timeout.removeItems) { proxy, once in
             proxy.removeItems(atPaths: paths) { removed, failures in
                 once.resume(returning: (removed, failures))
             }
@@ -55,7 +66,7 @@ actor HelperClient {
     }
 
     func thinLocalSnapshots() async throws -> ProcessOutput {
-        try await call { proxy, once in
+        try await call(timeout: Timeout.thinSnapshots) { proxy, once in
             proxy.thinLocalSnapshots { exitCode, output in
                 once.resume(returning: ProcessOutput(exitCode: exitCode, output: output))
             }
@@ -63,7 +74,7 @@ actor HelperClient {
     }
 
     func removeLaunchItem(atPath path: String) async throws -> (removed: Bool, message: String) {
-        try await call { proxy, once in
+        try await call(timeout: Timeout.launchItem) { proxy, once in
             proxy.removeLaunchItem(atPath: path) { removed, message in
                 once.resume(returning: (removed, message))
             }
@@ -72,24 +83,48 @@ actor HelperClient {
 
     // MARK: - Conexión
 
-    /// Puente entre el estilo *reply block* de NSXPC y async/await.
+    /// Puente entre el estilo *reply block* de NSXPC y async/await, con un plazo máximo.
+    ///
+    /// Si el demonio no escucha, launchd lo relanza sin fin y el mensaje nunca recibe ni
+    /// respuesta ni error: sin plazo, la espera no acabaría nunca.
     private func call<Value: Sendable>(
+        timeout: Duration,
         _ body: (any HelperProtocol, ResumeOnce<Value, any Error>) -> Void
     ) async throws -> Value {
-        try await withCheckedThrowingContinuation { continuation in
-            let once = ResumeOnce(continuation)
-            do {
-                let connection = try currentConnection()
-                let proxy = connection.remoteObjectProxyWithErrorHandler { error in
-                    once.resume(throwing: error)
+        var deadline: Task<Void, Never>?
+        defer { deadline?.cancel() }
+        do {
+            return try await withCheckedThrowingContinuation { continuation in
+                let once = ResumeOnce(continuation)
+                deadline = Task {
+                    try? await Task.sleep(for: timeout)
+                    guard !Task.isCancelled else { return }
+                    once.resume(throwing: ClientError.timedOut(timeout))
                 }
-                guard let helper = proxy as? any HelperProtocol else {
-                    throw ClientError.invalidProxy
-                }
-                body(helper, once)
-            } catch {
+                send(body, once: once)
+            }
+        } catch ClientError.timedOut(let limit) {
+            // La conexión puede haberse quedado atascada: la siguiente llamada abre otra.
+            discardCurrentConnection()
+            throw ClientError.timedOut(limit)
+        }
+    }
+
+    private func send<Value: Sendable>(
+        _ body: (any HelperProtocol, ResumeOnce<Value, any Error>) -> Void,
+        once: ResumeOnce<Value, any Error>
+    ) {
+        do {
+            let connection = try currentConnection()
+            let proxy = connection.remoteObjectProxyWithErrorHandler { error in
                 once.resume(throwing: error)
             }
+            guard let helper = proxy as? any HelperProtocol else {
+                throw ClientError.invalidProxy
+            }
+            body(helper, once)
+        } catch {
+            once.resume(throwing: error)
         }
     }
 
@@ -121,6 +156,11 @@ actor HelperClient {
 
         self.connection = connection
         return connection
+    }
+
+    private func discardCurrentConnection() {
+        connection?.invalidate()
+        connection = nil
     }
 
     private func discardConnection(_ identifier: ObjectIdentifier) {

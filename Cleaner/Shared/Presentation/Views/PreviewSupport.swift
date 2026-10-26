@@ -11,7 +11,7 @@ nonisolated struct SampleCleaningEngine: CleaningEngine {
         ScanSummary(items: Self.items.filter { categories.contains($0.category) }, entriesVisited: 1_284_512, duration: .seconds(14), inaccessibleCategories: [.mailAttachments])
     }
 
-    func clean(_ items: [ScanItem]) async throws -> CleaningReport {
+    func clean(_ items: [ScanItem], progress: AsyncStream<CleaningProgress>.Continuation) async throws -> CleaningReport {
         CleaningReport(reclaimedBytes: items.reduce(0) { $0 + $1.reclaimableBytes }, trashedBytes: 0, failures: [])
     }
 

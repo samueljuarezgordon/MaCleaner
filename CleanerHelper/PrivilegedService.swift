@@ -14,10 +14,14 @@ nonisolated final class PrivilegedService: NSObject, HelperProtocol {
     // MARK: - HelperProtocol
 
     func version(withReply reply: @escaping @Sendable (String) -> Void) {
+        IdleMonitor.shared.begin()
+        defer { IdleMonitor.shared.end() }
         reply(Self.version)
     }
 
     func removeItems(atPaths paths: [String], withReply reply: @escaping @Sendable ([String], [String]) -> Void) {
+        IdleMonitor.shared.begin()
+        defer { IdleMonitor.shared.end() }
         guard callerIsTrusted() else {
             reply([], ["Cliente no autorizado"])
             return
@@ -46,7 +50,10 @@ nonisolated final class PrivilegedService: NSObject, HelperProtocol {
             return
         }
 
+        // La operación sigue después de volver de este método: no puede cerrarse por inactividad.
+        IdleMonitor.shared.begin()
         Task {
+            defer { IdleMonitor.shared.end() }
             do {
                 // Pide liberar hasta ~1 TB de espacio purgable con urgencia máxima (4),
                 // lo que obliga a eliminar todas las instantáneas locales posibles.
@@ -80,7 +87,9 @@ nonisolated final class PrivilegedService: NSObject, HelperProtocol {
             return
         }
 
+        IdleMonitor.shared.begin()
         Task {
+            defer { IdleMonitor.shared.end() }
             // Los demonios viven en el dominio `system`; los agentes, en el de cada usuario
             // (la app los detiene antes de llamar aquí).
             if resolved.hasPrefix("/Library/LaunchDaemons/") {

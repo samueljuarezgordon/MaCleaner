@@ -26,6 +26,14 @@ final class CleanerViewModel {
         var id: CleaningCategory { category }
     }
 
+    /// Elemento que se está eliminando ahora mismo.
+    struct CurrentCleaning: Equatable {
+        let id: ScanItem.ID
+        let step: String
+        /// Desde cuándo se está eliminando, para detectar atascos.
+        let since: Date
+    }
+
     struct ModuleStats {
         var totalBytes: Int64 = 0
         var itemCount = 0
@@ -46,6 +54,11 @@ final class CleanerViewModel {
     private(set) var bytesFound: Int64 = 0
     private(set) var lastScanDuration: Duration?
     private(set) var lastReport: CleaningReport?
+    /// Elementos de la limpieza en curso o de la última, en el orden en que se eliminan.
+    private(set) var cleaningQueue: [ScanItem] = []
+    /// Cómo terminó cada elemento de `cleaningQueue` (los que faltan no tienen entrada).
+    private(set) var cleaningOutcomes: [ScanItem.ID: CleaningItemOutcome] = [:]
+    private(set) var currentCleaning: CurrentCleaning?
     private(set) var inaccessibleCategories: Set<CleaningCategory> = []
     private(set) var groupsByModule: [CleaningModule: [CategoryGroup]] = [:]
     private(set) var statsByModule: [CleaningModule: ModuleStats] = [:]
@@ -183,25 +196,59 @@ final class CleanerViewModel {
     /// Limpia la selección. Si `permanently` es `true`, lo que iría a la Papelera se borra
     /// directamente.
     func cleanSelection(permanently: Bool) {
-        let selected = selectedItems().map { item in
-            var item = item
-            if permanently, item.removal == .moveToTrash { item.removal = .delete }
-            return item
-        }
+        // De mayor a menor: lo que más espacio libera va primero.
+        let selected = selectedItems()
+            .sorted { $0.reclaimableBytes > $1.reclaimableBytes }
+            .map { item in
+                var item = item
+                if permanently, item.removal == .moveToTrash { item.removal = .delete }
+                return item
+            }
         guard !selected.isEmpty else { return }
+        cleaningQueue = selected
+        cleaningOutcomes = [:]
+        currentCleaning = nil
         phase = .cleaning
 
         activeTask = Task {
+            let (stream, continuation) = AsyncStream.makeStream(
+                of: CleaningProgress.self,
+                bufferingPolicy: .unbounded
+            )
+            // Tarea aparte y no hija: al detener la limpieza, los últimos avisos (lo que quedó
+            // sin tocar) tienen que llegar igualmente.
+            let consumption = Task { await consume(stream) }
             do {
-                lastReport = try await engine.clean(selected)
-                let cleaned = Set(selected.map(\.id))
+                let report = try await engine.clean(selected, progress: continuation)
+                continuation.finish()
+                await consumption.value
+                lastReport = report
+                // Sin resultado por elemento (iOS) se da todo por limpiado, como antes.
+                let cleaned = Set(selected.map(\.id).filter { cleaningOutcomes[$0]?.succeeded ?? true })
                 apply(items: items.filter { !cleaned.contains($0.id) }, inaccessible: inaccessibleCategories)
                 phase = .done
             } catch {
+                continuation.finish()
+                await consumption.value
                 errorMessage = error.localizedDescription
                 phase = .results
             }
+            currentCleaning = nil
             refreshDiskUsage()
+        }
+    }
+
+    private func consume(_ stream: AsyncStream<CleaningProgress>) async {
+        for await event in stream {
+            switch event {
+            case .started(let id, let step):
+                // Un cambio de paso del mismo elemento no reinicia el cronómetro.
+                let since = currentCleaning?.id == id ? currentCleaning?.since ?? .now : .now
+                currentCleaning = CurrentCleaning(id: id, step: step, since: since)
+            case .finished(let id, let outcome):
+                cleaningOutcomes[id] = outcome
+                if currentCleaning?.id == id { currentCleaning = nil }
+            }
         }
     }
 
@@ -376,6 +423,19 @@ extension CleanerViewModel {
             disabledCategories.formUnion(categories)
         }
         Preferences.disabledCategories = disabledCategories
+    }
+
+    /// Elementos de la limpieza en curso que ya terminaron, bien o mal.
+    var finishedCleaningCount: Int { cleaningOutcomes.count }
+
+    /// Bytes liberados o enviados a la Papelera hasta ahora en la limpieza en curso.
+    var cleanedBytesSoFar: Int64 {
+        cleaningQueue.reduce(0) { total, item in
+            switch cleaningOutcomes[item.id] {
+            case .removed, .trashed: total + item.reclaimableBytes
+            default: total
+            }
+        }
     }
 
     var completedCategoryCount: Int {

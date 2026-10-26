@@ -107,8 +107,9 @@ nonisolated struct IOSCleaningEngine: CleaningEngine {
         return found
     }
 
+    /// iOS limpia por grupos (Fototeca, archivos, purga) y no informa elemento a elemento.
     @concurrent
-    func clean(_ items: [ScanItem]) async throws -> CleaningReport {
+    func clean(_ items: [ScanItem], progress: AsyncStream<CleaningProgress>.Continuation) async throws -> CleaningReport {
         let photoItems = items.filter { $0.removal == .photoLibrary }
         let purgeItems = items.filter { $0.removal == .systemPurge }
         let fileItems = items.filter { $0.removal != .photoLibrary && $0.removal != .systemPurge }

@@ -1,5 +1,20 @@
 # Historial de cambios
 
+## 1.2.0 — 2026-10-26
+
+### Mac: el asistente privilegiado por fin responde
+- El demonio arrancaba y terminaba al instante sin atender a la app (`main.swift` era la plantilla de Xcode), así que nunca respondía: la purga de instantáneas y el borrado de cachés y registros del sistema se quedaban esperando para siempre. Ahora escucha en su servicio XPC.
+- Todas las llamadas al asistente tienen un plazo máximo: si no contesta, la app lo dice en lugar de esperar para siempre.
+- El asistente se cierra solo tras 2 minutos sin uso y macOS lo vuelve a abrir cuando hace falta.
+- **Diagnosticar el asistente** (Mantenimiento y permisos): comprueba firma, bundle, ubicación, registro, launchd y respuesta, y dice en qué paso falla. El informe se puede copiar.
+
+### Mac: progreso y bloqueos de cada eliminación
+- La limpieza muestra cada elemento: en cola, en curso (con su paso y el tiempo que lleva), eliminado, en la Papelera o con el motivo del fallo. Se ven en todo momento los elementos hechos y el espacio liberado.
+- Si un elemento tarda más de 15 s, se avisa y se explica qué suele retenerlo (una app abierta, una contraseña pendiente, Xcode o el Simulador abiertos, el asistente privilegiado…).
+- «Detener» corta la limpieza al momento y deja sin tocar el resto, que aparece como no eliminado.
+- Antes del primer elemento del sistema se comprueba que el asistente privilegiado responde: si no, esos elementos fallan enseguida con el motivo en lugar de quedarse esperando. Los elementos del sistema se borran de uno en uno para ver cuál se atasca.
+- Mantenimiento: cada acción muestra el paso en curso, el tiempo transcurrido y un botón «Dejar de esperar». Al purgar instantáneas se ven las que quedan y el espacio liberado, y se avisa si una copia de Time Machine en curso las está reteniendo. Los detalles técnicos llevan hora.
+
 ## 1.1.0 — 2026-10-26
 
 ### iPhone y iPad: limpieza de la basura del sistema
