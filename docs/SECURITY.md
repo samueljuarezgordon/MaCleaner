@@ -23,10 +23,18 @@ Demonio de launchd registrado con `SMAppService.daemon(plistName:)` y ejecutado 
 - **Sin Team ID (firma ad hoc)** no se puede construir un requisito fiable y se rechaza todo (*fail closed*).
 - `PrivilegedService` vuelve a validar al llamante justo antes de cada operación destructiva.
 
+### Ciclo de vida
+
+- launchd arranca el demonio bajo demanda, cuando la app se conecta a su servicio Mach.
+- `main.swift` solo crea el `NSXPCListener`; toda conexión pasa por `HelperListenerDelegate` antes de exportar `PrivilegedService`.
+- `IdleMonitor` lo termina tras **2 minutos sin operaciones en curso**: no queda un proceso root vivo sin necesidad. Una purga o un borrado largo cuentan como actividad hasta que responden.
+- En la app, cada llamada tiene un plazo máximo (`HelperClient.Timeout`): un demonio que no contesta no deja a la app esperando para siempre.
+
 ### Operaciones expuestas
 
 | Método | Restricción |
 |---|---|
+| `version` | Solo devuelve la versión. La conexión ya se validó al aceptarla. |
 | `removeItems(atPaths:)` | Solo dentro de `/Library/Caches`, `/Library/Logs` y `/private/var/log`. |
 | `thinLocalSnapshots` | Ejecuta exactamente `tmutil thinlocalsnapshots / 999999999999 4`. |
 | `removeLaunchItem(atPath:)` | Solo un plist que sea hijo directo de `/Library/LaunchAgents` o `/Library/LaunchDaemons`. |
@@ -41,6 +49,13 @@ Demonio de launchd registrado con `SMAppService.daemon(plistName:)` y ejecutado 
 ## Operaciones en el contexto del usuario
 
 Simuladores (`simctl`), LaunchServices (`lsregister`), Quick Look (`qlmanage`) y los agentes de `~/Library/LaunchAgents` se gestionan desde la app, no desde el demonio. Así operan sobre los datos del usuario y no requieren root.
+
+## Cómo comprobarlo
+
+La validación se puede probar con un cliente XPC mínimo que llame a `version` (ver [CONTRIBUTING.md](../CONTRIBUTING.md#probar-el-asistente-sin-la-app)):
+
+- Firmado con el certificado del equipo y el identificador `com.tuempresa.Cleaner`: responde.
+- Con firma ad hoc (`codesign -s -`), aunque use el mismo identificador: la conexión se rechaza (`NSCocoaErrorDomain` 4097).
 
 ## Informar de una vulnerabilidad
 

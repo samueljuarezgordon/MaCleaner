@@ -109,15 +109,26 @@ struct DiskUsageCard: View {
             .frame(width: 64, height: 64)
 
             VStack(alignment: .leading, spacing: 4) {
+                #if os(macOS)
                 Text("Disco de arranque")
                     .font(.headline)
+                #else
+                Text("Almacenamiento")
+                    .font(.headline)
+                #endif
                 Text("\(usage.availableBytes.byteString) libres de \(usage.totalBytes.byteString)")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if usage.purgeableBytes > 0 {
+                    #if os(macOS)
                     Text("+ \(usage.purgeableBytes.byteString) purgables por macOS")
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    #else
+                    Text("+ \(usage.purgeableBytes.byteString) purgables por iOS")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    #endif
                 }
             }
         }

@@ -173,8 +173,13 @@ private struct SidebarDiskUsage: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
+            #if os(macOS)
             Label("Disco de arranque", systemImage: "internaldrive.fill")
                 .font(.caption.weight(.semibold))
+            #else
+            Label("Almacenamiento", systemImage: "internaldrive.fill")
+                .font(.caption.weight(.semibold))
+            #endif
             ProgressView(value: usage.usedFraction)
                 .tint(usage.usedFraction > 0.9 ? .red : .accentColor)
             Text("\(usage.availableBytes.byteString) libres de \(usage.totalBytes.byteString)")

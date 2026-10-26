@@ -1,5 +1,19 @@
 # Historial de cambios
 
+## Sin publicar
+
+### Documentación
+- Guías de uso nuevas, pantalla por pantalla: [Mac](docs/GUIA-MAC.md) y [iPhone y iPad](docs/GUIA-IOS.md). Cubren instalación, permisos, análisis, revisión, limpieza con su progreso, mantenimiento, ajustes y problemas frecuentes.
+- README reorganizado como portada, con enlaces a cada guía.
+- Arquitectura al día: contrato del motor con progreso, limpieza elemento a elemento, mantenimiento y ciclo de vida del asistente.
+- Asistente: diagnóstico desde la app explicado línea a línea y cómo leer `launchctl print`.
+- Seguridad: ciclo de vida del demonio y cómo comprobar que rechaza clientes no autorizados.
+- Contribuir: compilar las dos plataformas, añadir métodos de borrado, probar el asistente sin la app y publicar una release.
+- Catálogo de categorías: cómo se elimina cada una.
+
+### iPhone y iPad
+- La tarjeta y la barra lateral del espacio decían «Disco de arranque» y «purgables por macOS». Ahora dicen «Almacenamiento» y «purgables por iOS».
+
 ## 1.2.0 — 2026-10-26
 
 ### Mac: el asistente privilegiado por fin responde

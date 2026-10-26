@@ -33,17 +33,45 @@ Reinstalar no borra nada. La app da de baja el demonio con `SMAppService.unregis
 
 ### ¿Por qué hace falta?
 
-`SMAppService` ejecuta el binario que hay **dentro** de `MaCleaner.app` (no lo copia a otra carpeta). Aun así, si el proceso antiguo sigue en marcha, sigue respondiendo con su código anterior hasta que se detiene. Una versión antigua no conoce las operaciones nuevas.
+`SMAppService` ejecuta el binario que hay **dentro** de `MaCleaner.app` (no lo copia a otra carpeta). Al actualizar la app en el mismo sitio, el siguiente arranque ya usa el binario nuevo; y como el asistente se cierra solo tras 2 minutos sin uso, normalmente basta con esperar. Reinstalar sigue siendo útil cuando:
+
+- el proceso antiguo sigue en marcha y responde con su código anterior,
+- la app se movió o renombró y el registro apunta a otra copia,
+- macOS retiró la aprobación.
+
+## Diagnosticar desde la app
+
+En **Mantenimiento y permisos**, debajo del asistente, pulsa **Diagnosticar el asistente**. Cada línea es una comprobación, en el orden en que puede fallar la cadena:
+
+| Comprobación | ✓ significa | ✗ / ! significa | Qué hacer |
+|---|---|---|---|
+| Firma de la app | Firmada con un Team ID. | Firma ad hoc: el asistente nunca la aceptará. | Firma la app con un equipo (*Signing & Capabilities*). |
+| Asistente dentro de la app | `CleanerHelper` y su plist están en el bundle, firmados por el mismo equipo. | Falta algo o lo firmó otro equipo. | Vuelve a descargar o compilar el esquema completo. |
+| Ubicación de la app | Se ejecuta desde `/Applications`. | (!) Se ejecuta desde otra carpeta. | Deja una sola copia en Aplicaciones y reinstala desde ella. |
+| Registro en el sistema | `SMAppService` lo da por activo. | No registrado, pendiente de aprobar o plist no encontrado. | Instalar o aprobar en *Ítems de inicio y extensiones*. |
+| Respuesta del asistente | Contesta con la versión que espera la app, y en cuánto tiempo. | No contesta en 5 s, o (!) contesta otra versión. | Reinstalar. |
+| Proceso en launchd | En marcha, o detenido a la espera (normal: se cierra solo sin uso). | launchd lo arranca pero no responde: el binario registrado no escucha. | Reinstalar con la versión actual de la app. |
+
+**Copiar informe** copia el resultado en texto, con ✓, ! y ✗, para pegarlo en una incidencia.
 
 ## Comprobar el estado desde Terminal
 
 ```sh
-# ¿Está cargado y en ejecución?
-sudo launchctl print system/com.tuempresa.Cleaner.Helper | head -20
+# Estado, número de arranques, última salida y pid (no necesita sudo)
+launchctl print system/com.tuempresa.Cleaner.Helper | grep -E '^\s(state|runs|pid|last exit code) ='
 
 # Registro de ítems en segundo plano (busca MaCleaner)
 sudo sfltool dumpbtm | grep -A6 -i cleaner
 ```
+
+Cómo leer `launchctl print`:
+
+| Lo que ves | Qué significa |
+|---|---|
+| `state = running` y un `pid` | En marcha, atendiendo a la app. |
+| `state = not running`, `last exit code = 0` y pocos `runs` | Normal: se cerró solo tras 2 minutos sin uso y se arrancará en la próxima petición. |
+| `runs` muy alto y subiendo, `last exit code = 0`, la app dice que no responde | El binario arranca y termina sin escuchar. Reinstala con una versión corregida. |
+| `Could not find service` | No está registrado. Pulsa **Instalar**. |
 
 ## Solución de problemas
 

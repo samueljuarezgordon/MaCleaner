@@ -2,6 +2,14 @@
 
 Cada categoría pertenece a un módulo de la barra lateral. Los textos *Qué es* y *Si lo borras* que ve el usuario están en `CleaningCategory.explanation` y `CleaningCategory.consequence`. El riesgo de cada elemento lo decide su recolector.
 
+En la columna *Borrado*:
+
+- **Definitivo**: la app lo borra directamente. Solo se usa con lo que se regenera solo.
+- **Papelera**: se puede recuperar hasta que vacíes la Papelera.
+- **Asistente**: lo borra el asistente privilegiado, siempre de forma definitiva y solo dentro de su lista blanca.
+
+Cómo se usan en la app: [Guía de Mac](GUIA-MAC.md) y [Guía de iPhone y iPad](GUIA-IOS.md).
+
 ## macOS
 
 ### Basura del sistema
@@ -11,22 +19,23 @@ Cada categoría pertenece a un módulo de la barra lateral. Los textos *Qué es*
 | Cachés de usuario | `~/Library/Caches/*`, `~/Library/Containers/*/Data/Library/Caches` | Seguro. Revisar si la app está abierta, es de un gestor de paquetes o es de iCloud. | Definitivo |
 | Cachés de apps | Carpetas `Cache`, `Code Cache`, `GPUCache`… en `~/Library/Application Support/<App>` | Seguro. Revisar si la app está abierta. | Definitivo |
 | Cachés del sistema | `/Library/Caches/*` | Seguro | Asistente |
-| Registros | `~/Library/Logs`, `/Library/Logs`, `/private/var/log` | Seguro | Definitivo / asistente |
+| Registros de usuario | `~/Library/Logs` | Seguro | Definitivo |
+| Registros del sistema | `/Library/Logs`, `/private/var/log` | Seguro | Asistente |
 | Adjuntos de Mail | `~/Library/Containers/com.apple.mail/Data/Library/Mail Downloads` | Seguro | Definitivo |
 
 ### Desarrollo
 
-| Categoría | Riesgo |
-|---|---|
-| DerivedData | Seguro |
-| Soporte de dispositivos | Seguro si no se usa en 180 días; si no, Revisar |
-| Archivos de Xcode (`.xcarchive`) | Riesgo alto (contienen los dSYM). Van a la Papelera. |
-| Otros datos de Xcode | Seguro |
-| **Simuladores** | Seguro: no arranca, nunca se arrancó o no se usa en 90 días. Revisar: uso reciente. Riesgo alto: encendido. |
-| **Runtimes** | Seguro: no está listo o ningún simulador lo usa. Revisar: lo usan simuladores (se indica cuáles). |
-| Cachés de simuladores | Seguro |
-| Cachés de paquetes | Revisar (se vuelven a descargar) |
-| Dependencias y compilaciones | Seguro si el proyecto no se toca en 90 días; si no, Revisar |
+| Categoría | Riesgo | Borrado |
+|---|---|---|
+| DerivedData de Xcode | Seguro | Definitivo |
+| Soporte de dispositivos | Seguro si no se usa en 180 días; si no, Revisar | Definitivo |
+| Archivos de Xcode (`.xcarchive`) | Riesgo alto (contienen los dSYM) | Papelera |
+| Otros datos de Xcode | Seguro | Definitivo |
+| **Simuladores** | Seguro: no arranca, nunca se arrancó o no se usa en 90 días. Revisar: uso reciente. Riesgo alto: encendido. | `simctl shutdown` + `simctl delete` |
+| **Runtimes de simulador** | Seguro: no está listo o ningún simulador lo usa. Revisar: lo usan simuladores (se indica cuáles). | `simctl runtime delete` |
+| Cachés de simuladores | Seguro | Definitivo |
+| Cachés de paquetes | Revisar (se vuelven a descargar) | Definitivo |
+| Dependencias y compilaciones | Seguro si el proyecto no se toca en 90 días; si no, Revisar | Definitivo |
 
 Artefactos de proyecto reconocidos (`ProjectArtifact`):
 
@@ -51,6 +60,8 @@ Se analizan las apps de `/Applications` y `~/Applications`, también dentro de c
 - **Pesada**: 1 GB o más contando sus datos.
 - **Datos asociados**: `Application Support`, `Caches`, `Containers`, `Preferences/<id>.plist`, `Saved Application State`, `HTTPStorages`, `WebKit` y `Logs`, por identificador y, si el nombre tiene 4 o más letras, por nombre.
 
+Al limpiar, la app va a la Papelera con `NSWorkspace.recycle` (pide la contraseña si es de root) y sus datos asociados también van a la Papelera.
+
 | Situación | Riesgo |
 |---|---|
 | Abierta ahora | Riesgo alto |
@@ -60,6 +71,9 @@ Se analizan las apps de `/Applications` y `~/Applications`, también dentro de c
 ### Inicio y rendimiento
 
 Se leen los plist de `~/Library/LaunchAgents`, `/Library/LaunchAgents` y `/Library/LaunchDaemons` (sin `com.apple.*`). El estado se obtiene de `launchctl list`.
+
+- **Agentes de tu usuario** (`~/Library/LaunchAgents`): se detienen con `launchctl bootout gui/<uid>/<label>` y su plist va a la Papelera.
+- **Servicios de terceros** (`/Library`): los agentes se detienen en tu sesión; los demonios, con `bootout system/<label>` desde el asistente, que además borra el plist. La etiqueta se lee del propio plist.
 
 | Situación | Riesgo |
 |---|---|
@@ -72,14 +86,16 @@ Se leen los plist de `~/Library/LaunchAgents`, `/Library/LaunchAgents` y `/Libra
 
 ### Otros
 
-| Categoría | Riesgo |
-|---|---|
-| Instaladores | Revisar (las actualizaciones `.ipsw` del Finder son Seguro) |
-| Comprimidos | Revisar si existe la carpeta descomprimida al lado; si no, Riesgo alto |
-| Restos de apps | Revisar; Riesgo alto si hay apps del mismo fabricante |
-| Archivos grandes (≥ 500 MB) | Riesgo alto |
-| Copias de iPhone/iPad | Riesgo alto; Revisar si tienen más de un año |
-| Papelera | Seguro |
+| Categoría | Riesgo | Borrado |
+|---|---|---|
+| Instaladores | Revisar (las actualizaciones `.ipsw` del Finder son Seguro) | Papelera |
+| Archivos comprimidos | Revisar si existe la carpeta descomprimida al lado; si no, Riesgo alto | Papelera |
+| Restos de apps desinstaladas | Revisar; Riesgo alto si hay apps del mismo fabricante | Papelera |
+| Archivos grandes (≥ 500 MB) | Riesgo alto | Papelera |
+| Copias de iPhone y iPad | Riesgo alto; Revisar si tienen más de un año | Papelera |
+| Papelera | Seguro | Definitivo |
+
+Con **No usar la Papelera** (en Ajustes o en la hoja de revisión), lo que iría a la Papelera se borra definitivamente.
 
 ## iOS / iPadOS
 
